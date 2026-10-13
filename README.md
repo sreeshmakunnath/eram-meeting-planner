@@ -1,6 +1,28 @@
-# ERAM Meeting Planner — Phase 1
+# ERAM Meeting Planner — Phases 1 & 2
 
-Meeting and task planner for ERAM Holdings. This first phase delivers the foundation the meeting and task modules build on:
+Meeting and task planner for ERAM Holdings.
+
+## Phase 2 — Client meetings and reports
+
+| Feature | What works |
+| --- | --- |
+| Meeting entry | Every column of the **Client Meeting Planner** sheet: priority, client (dropdown from the client master, or "+ Add new client"), country / location, platform + venue or link, client contacts (picked from that client's contacts, plus free text), ERAM attendees (groups and/or people), meeting type, date + start/end time (Saudi time), status, objective / agenda, business units, presentation / documents, next action, action owner(s), follow-up date, notes. Picking a client pre-fills location, business units and the client's account group |
+| Status flow | To Be Scheduled → Scheduled (automatic once a date is set) → Confirmed → Completed; Postponed and Cancelled. Quick buttons on the meeting page |
+| Invites | Scheduling, rescheduling, confirming and cancelling email the ERAM attendees with an **.ics calendar invite** (Outlook adds / updates / removes it). Added or removed attendees get their own invite or cancellation |
+| Clash warning | Shown on the meeting page when an attendee has another meeting at the same time |
+| Calendar | Month grid (Sun–Sat, Fri/Sat shaded) and agenda view, filters by person / group / client, click a day to plan a meeting there, "To Be Scheduled" side panel |
+| Meeting Brief | The **Meeting Brief** sheet as a form after the meeting: client attendees, attendance ticks, key discussion points, documents used, outcomes / opportunities, agreed actions (action, owner = person or group, deadline), next follow-up date. Save draft or submit; submit marks the meeting Completed, emails the brief to attendees and action owners, and creates a **follow-up meeting** (To Be Scheduled) when a follow-up date is set. Submitted briefs are locked; organiser / Admin can reopen (version +1) |
+| Print / PDF | Printable brief in the sheet's two-column layout (browser "Save as PDF") |
+| Activity log | Per meeting: created, rescheduled (from → to), status changes, attendees added / removed, field changes, brief saved / submitted / reopened |
+| Planner report | Filterable list (status, priority, client, attendee, group, date range) + **Excel export** with the sheet's 16 columns and ERAM header |
+| Excel import | Admin uploads the existing planner .xlsx. Clients are matched (including near-matches like "Sabbic" → SABIC) or added; attendees / owners matched to users by name, unmatched names kept in notes. Re-running skips rows already imported. No emails during import |
+| Client status | One page for all clients: overall status (**Follow-up overdue / To be scheduled / Meeting booked / Met — no next step / No meeting yet**) with counts, BD stage (changeable inline by Admin or account owner), last meeting, next meeting, current next action + owner, follow-up date, agreed actions, meetings done. Filter by status, stage, owner; **Excel export** |
+| Dashboard | My meetings this week, briefs to write, my next actions, next 7 days; Admin: meetings this month, to be scheduled, follow-ups overdue |
+
+Who sees what: Admins see every meeting. Users see meetings they organise, attend (directly or through a group), own the next action of, or own an agreed action on the meeting's brief (as a person or as a member of the owning group). Only the organiser or an Admin edits a meeting; any attendee can write the brief.
+
+## Phase 1 — Foundation
+
 
 | Module | What works |
 | --- | --- |
@@ -13,7 +35,7 @@ Meeting and task planner for ERAM Holdings. This first phase delivers the founda
 | Client master | Client fields + contacts, search / filters, CSV export (opens in Excel). Clients that users add stay **Pending review** until an Admin approves or merges them; likely duplicates (e.g. "Sabbic" vs "SABIC") are flagged |
 | Dashboard | Personal tiles + Admin organisation view (BD pipeline by stage, users by branch). Meeting and task tiles fill in Phases 2–3 |
 | Audit log | Sign-ins, failed sign-ins, lockouts, password events and every change to users, groups, clients and masters |
-| Email | Instant emails only (welcome, reset, added to group). Scheduled reminders are a later phase |
+| Email | Instant emails only (welcome, reset, added to group; Phase 2 adds meeting invites and briefs). Scheduled reminders are a later phase |
 
 The 10 companies from the Client Meeting Planner / BD Target Schedule are seeded as the first clients.
 
@@ -40,6 +62,7 @@ cp .env.example .env          # then set NEXTAUTH_SECRET (openssl rand -base64 3
 npm install
 npm run db:migrate            # creates the tables
 npm run db:seed               # branches, business units, first admin, 10 clients
+# optional: sign in as admin → Meetings → Import Excel → upload ERAM_Meeting_Planner.xlsx
 npm run dev                   # http://localhost:3000
 ```
 
@@ -75,7 +98,11 @@ src/
   components/            UI helpers, sidebar, form wrapper
   db/schema.ts           all tables (Drizzle)
   db/migrate.ts, seed.ts
-  lib/actions/           server actions: auth, users, groups, clients, masters
+  lib/actions/           server actions: auth, users, groups, clients, masters, meetings, briefs, import
+  lib/meetings.ts        meeting labels, Saudi-time helpers, visibility rules, .ics builder
+  lib/meeting-queries.ts planner list / calendar queries
+  lib/client-status.ts   client status board logic
+  lib/excel.ts           branded Excel export
   lib/auth.ts            next-auth config, lockout, requireUser / requireAdmin
   lib/mail.ts            email layout + sending
   lib/audit.ts           audit log writer
@@ -83,11 +110,12 @@ src/
 drizzle/                 SQL migrations (generated)
 ```
 
+Upgrading an existing Phase 1 database: just deploy (or run `npm run db:migrate`); migration `0001_meetings` adds the meeting tables and keeps all data.
+
 Changing the schema: edit `src/db/schema.ts`, run `npm run db:generate` (writes a new SQL migration), then `npm run db:migrate`.
 
 ## Next phases
 
-- **Phase 2: Meetings.** Meeting records with every field from the Client Meeting Planner sheet, client dropdown with contacts, attendees as users and/or groups, status flow, month/week/day/agenda calendar, invitation emails with .ics, meeting activity log, Excel import of the current planner.
-- **Phase 3: Tasks and reports.** Task planner (list, board, timeline), Meeting Brief with agreed actions → tasks, Planner / Target Schedule / task reports with Excel and PDF export.
+- **Phase 3: Tasks.** Task planner (list, board, timeline), brief agreed actions become tasks, BD Target Schedule report (research / MIR / approach / follow-up deadlines per company), task reports.
 - **Phase 4: Dashboards.** Individual and org-wide widgets for meetings and tasks.
 - **Later:** scheduled reminders and digests (Vercel Cron), Microsoft sign-in.

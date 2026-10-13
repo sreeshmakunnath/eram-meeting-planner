@@ -211,6 +211,7 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   createdBy: one(users, { fields: [clients.createdById], references: [users.id] }),
   contacts: many(clientContacts),
   businessUnits: many(clientBusinessUnits),
+  meetings: many(meetings),
 }));
 
 export const clientBusinessUnitsRelations = relations(clientBusinessUnits, ({ one }) => ({
@@ -226,6 +227,219 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
 
+// =====================================================================
+// Phase 2 — Meetings (fields follow the ERAM Holdings Client Meeting Planner sheet)
+// =====================================================================
+export const priorityEnum = pgEnum("priority", ["HIGH", "MEDIUM", "LOW"]);
+export const meetingStatusEnum = pgEnum("meeting_status", [
+  "TO_BE_SCHEDULED",
+  "SCHEDULED",
+  "CONFIRMED",
+  "COMPLETED",
+  "POSTPONED",
+  "CANCELLED",
+]);
+export const meetingTypeEnum = pgEnum("meeting_type", ["CLIENT_MEETING", "INTERNAL", "FOLLOW_UP", "PRESENTATION", "SITE_VISIT"]);
+export const meetingModeEnum = pgEnum("meeting_mode", ["IN_PERSON", "TEAMS", "ZOOM", "PHONE"]);
+export const briefStatusEnum = pgEnum("brief_status", ["DRAFT", "SUBMITTED"]);
+
+export const meetings = pgTable(
+  "meetings",
+  {
+    id: serial("id").primaryKey(),
+    title: varchar("title", { length: 200 }).notNull(),
+    priority: priorityEnum("priority").default("MEDIUM").notNull(),
+    clientId: integer("client_id").references(() => clients.id),
+    location: varchar("location", { length: 150 }), // Country / Location
+    mode: meetingModeEnum("mode").default("IN_PERSON").notNull(), // Location / Platform
+    venue: varchar("venue", { length: 300 }), // address or meeting link
+    clientContactsText: varchar("client_contacts_text", { length: 500 }), // contacts not in the client master
+    type: meetingTypeEnum("type").default("CLIENT_MEETING").notNull(),
+    startAt: timestamp("start_at", { withTimezone: true }), // blank while To Be Scheduled
+    endAt: timestamp("end_at", { withTimezone: true }),
+    status: meetingStatusEnum("status").default("TO_BE_SCHEDULED").notNull(),
+    objective: text("objective").notNull(), // Meeting Objective / Agenda
+    documents: text("documents"), // Presentation / Documents
+    nextAction: text("next_action"),
+    followUpDate: timestamp("follow_up_date", { mode: "string", withTimezone: false }),
+    notes: text("notes"),
+    organiserId: integer("organiser_id")
+      .notNull()
+      .references(() => users.id),
+    parentMeetingId: integer("parent_meeting_id").references((): AnyPgColumn => meetings.id), // follow-up of
+    icsSequence: integer("ics_sequence").default(0).notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("meetings_start_idx").on(t.startAt), index("meetings_client_idx").on(t.clientId), index("meetings_status_idx").on(t.status)],
+);
+
+/** ERAM attendees. Group members are copied in at save time (viaGroupId set); past meetings keep their list. */
+export const meetingAttendees = pgTable(
+  "meeting_attendees",
+  {
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    viaGroupId: integer("via_group_id").references(() => groups.id, { onDelete: "set null" }),
+    attended: boolean("attended"),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.userId] }), index("meeting_attendees_user_idx").on(t.userId)],
+);
+
+export const meetingGroups = pgTable(
+  "meeting_groups",
+  {
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    groupId: integer("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.groupId] })],
+);
+
+export const meetingContacts = pgTable(
+  "meeting_contacts",
+  {
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    contactId: integer("contact_id")
+      .notNull()
+      .references(() => clientContacts.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.contactId] })],
+);
+
+export const meetingBusinessUnits = pgTable(
+  "meeting_business_units",
+  {
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.businessUnitId] })],
+);
+
+/** Action owner(s) for the meeting's Next Action. */
+export const meetingActionOwners = pgTable(
+  "meeting_action_owners",
+  {
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+  },
+  (t) => [primaryKey({ columns: [t.meetingId, t.userId] }), index("meeting_action_owners_user_idx").on(t.userId)],
+);
+
+/** Meeting Brief — one per meeting, fields from the ERAM Holdings Meeting Brief sheet. */
+export const meetingBriefs = pgTable("meeting_briefs", {
+  id: serial("id").primaryKey(),
+  meetingId: integer("meeting_id")
+    .notNull()
+    .unique()
+    .references(() => meetings.id, { onDelete: "cascade" }),
+  clientAttendees: text("client_attendees"),
+  discussionPoints: text("discussion_points"),
+  outcomes: text("outcomes"), // Key Outcomes / Opportunities
+  documentsUsed: text("documents_used"),
+  nextFollowUpDate: timestamp("next_follow_up_date", { mode: "string", withTimezone: false }),
+  status: briefStatusEnum("status").default("DRAFT").notNull(),
+  version: integer("version").default(1).notNull(),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }),
+  submittedById: integer("submitted_by_id").references(() => users.id),
+  followUpMeetingId: integer("follow_up_meeting_id").references(() => meetings.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** Agreed Actions rows on the brief (action, owner, deadline). Become tasks in Phase 3. */
+export const briefActions = pgTable("brief_actions", {
+  id: serial("id").primaryKey(),
+  briefId: integer("brief_id")
+    .notNull()
+    .references(() => meetingBriefs.id, { onDelete: "cascade" }),
+  position: integer("position").default(0).notNull(),
+  action: text("action").notNull(),
+  ownerUserId: integer("owner_user_id").references(() => users.id),
+  ownerGroupId: integer("owner_group_id").references(() => groups.id),
+  deadline: timestamp("deadline", { mode: "string", withTimezone: false }),
+});
+
+/** Everything that happens to a meeting: created, rescheduled, attendees changed, status, brief… */
+export const meetingActivity = pgTable(
+  "meeting_activity",
+  {
+    id: serial("id").primaryKey(),
+    meetingId: integer("meeting_id")
+      .notNull()
+      .references(() => meetings.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.id),
+    action: varchar("action", { length: 50 }).notNull(),
+    details: jsonb("details"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("meeting_activity_idx").on(t.meetingId, t.createdAt)],
+);
+
+export const meetingsRelations = relations(meetings, ({ one, many }) => ({
+  client: one(clients, { fields: [meetings.clientId], references: [clients.id] }),
+  organiser: one(users, { fields: [meetings.organiserId], references: [users.id] }),
+  attendees: many(meetingAttendees),
+  groups: many(meetingGroups),
+  contacts: many(meetingContacts),
+  businessUnits: many(meetingBusinessUnits),
+  actionOwners: many(meetingActionOwners),
+  brief: one(meetingBriefs, { fields: [meetings.id], references: [meetingBriefs.meetingId] }),
+}));
+export const meetingAttendeesRelations = relations(meetingAttendees, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingAttendees.meetingId], references: [meetings.id] }),
+  user: one(users, { fields: [meetingAttendees.userId], references: [users.id] }),
+  viaGroup: one(groups, { fields: [meetingAttendees.viaGroupId], references: [groups.id] }),
+}));
+export const meetingGroupsRelations = relations(meetingGroups, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingGroups.meetingId], references: [meetings.id] }),
+  group: one(groups, { fields: [meetingGroups.groupId], references: [groups.id] }),
+}));
+export const meetingContactsRelations = relations(meetingContacts, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingContacts.meetingId], references: [meetings.id] }),
+  contact: one(clientContacts, { fields: [meetingContacts.contactId], references: [clientContacts.id] }),
+}));
+export const meetingBusinessUnitsRelations = relations(meetingBusinessUnits, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingBusinessUnits.meetingId], references: [meetings.id] }),
+  businessUnit: one(businessUnits, { fields: [meetingBusinessUnits.businessUnitId], references: [businessUnits.id] }),
+}));
+export const meetingActionOwnersRelations = relations(meetingActionOwners, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingActionOwners.meetingId], references: [meetings.id] }),
+  user: one(users, { fields: [meetingActionOwners.userId], references: [users.id] }),
+}));
+export const meetingBriefsRelations = relations(meetingBriefs, ({ one, many }) => ({
+  meeting: one(meetings, { fields: [meetingBriefs.meetingId], references: [meetings.id] }),
+  actions: many(briefActions),
+  submittedBy: one(users, { fields: [meetingBriefs.submittedById], references: [users.id] }),
+}));
+export const briefActionsRelations = relations(briefActions, ({ one }) => ({
+  brief: one(meetingBriefs, { fields: [briefActions.briefId], references: [meetingBriefs.id] }),
+  owner: one(users, { fields: [briefActions.ownerUserId], references: [users.id] }),
+  ownerGroup: one(groups, { fields: [briefActions.ownerGroupId], references: [groups.id] }),
+}));
+export const meetingActivityRelations = relations(meetingActivity, ({ one }) => ({
+  meeting: one(meetings, { fields: [meetingActivity.meetingId], references: [meetings.id] }),
+  user: one(users, { fields: [meetingActivity.userId], references: [users.id] }),
+}));
+
+export type Meeting = typeof meetings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Client = typeof clients.$inferSelect;

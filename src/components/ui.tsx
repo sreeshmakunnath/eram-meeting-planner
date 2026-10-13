@@ -21,7 +21,7 @@ const tones: Record<string, string> = {
   navy: "bg-navy-50 text-navy ring-navy/20",
 };
 export function Badge({ tone = "gray", children }: { tone?: keyof typeof tones; children: React.ReactNode }) {
-  return <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
+  return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${tones[tone]}`}>{children}</span>;
 }
 
 export function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {

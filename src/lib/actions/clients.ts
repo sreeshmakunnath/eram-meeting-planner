@@ -130,3 +130,15 @@ export async function deleteContact(clientId: number, contactId: number) {
   await audit(me.id, "CONTACT_DELETED", "client", clientId, { contactId });
   revalidatePath(`/clients/${clientId}`);
 }
+
+/** Inline BD stage change from the client status board (Admin or account owner). */
+export async function updateBdStage(clientId: number, fd: FormData) {
+  const me = await requireUser();
+  const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
+  if (!client || !canEdit(me, client)) return;
+  const v = str(fd, "bdStage") as (typeof BD_STAGES)[number] | null;
+  const bdStage = v && BD_STAGES.includes(v) ? v : null;
+  await db.update(schema.clients).set({ bdStage }).where(eq(schema.clients.id, clientId));
+  await audit(me.id, "CLIENT_STAGE_CHANGED", "client", clientId, { from: client.bdStage, to: bdStage });
+  revalidatePath("/reports/client-status");
+}

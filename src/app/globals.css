@@ -18,3 +18,8 @@
   .table td { @apply px-4 py-2.5 align-top; }
   .link { @apply font-medium text-brand hover:underline; }
 }
+
+@media print {
+  @page { size: A4; margin: 14mm; }
+  body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}

@@ -31,17 +31,30 @@ export const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
 /** Sends an email. Without SMTP_HOST (local dev) the message is printed to the server console instead. */
-export async function sendMail(to: string | string[], subject: string, title: string, bodyHtml: string) {
+export async function sendMail(
+  to: string | string[],
+  subject: string,
+  title: string,
+  bodyHtml: string,
+  opts: { ics?: { method: "REQUEST" | "CANCEL"; content: string } } = {},
+) {
+  if (!([to].flat().filter(Boolean).length)) return;
   const html = layout(title, bodyHtml);
   const t = transport();
   if (!t) {
     const links = [...bodyHtml.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
     const text = bodyHtml.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    console.log(`\n--- EMAIL (SMTP not configured) ---\nTo: ${[to].flat().join(", ")}\nSubject: ${subject}\n${text}${links.length ? `\nLinks: ${links.join(" ")}` : ""}\n---\n`);
+    console.log(`\n--- EMAIL (SMTP not configured) ---\nTo: ${[to].flat().join(", ")}\nSubject: ${subject}\n${text}${links.length ? `\nLinks: ${links.join(" ")}` : ""}${opts.ics ? `\nCalendar invite attached (${opts.ics.method})` : ""}\n---\n`);
     return;
   }
   try {
-    await t.sendMail({ from: process.env.MAIL_FROM || `${appName} <no-reply@localhost>`, to, subject, html });
+    await t.sendMail({
+      from: process.env.MAIL_FROM || `${appName} <no-reply@localhost>`,
+      to,
+      subject,
+      html,
+      icalEvent: opts.ics ? { method: opts.ics.method, filename: "invite.ics", content: opts.ics.content } : undefined,
+    });
   } catch (e) {
     // A failed email should not fail the user's action; it is logged for follow-up.
     console.error("sendMail failed", subject, e);

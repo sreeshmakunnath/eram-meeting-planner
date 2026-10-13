@@ -7,6 +7,8 @@ import { db, schema } from "@/db";
 import { addContact, approveClient, deleteContact, mergeClient, setPrimaryContact } from "@/lib/actions/clients";
 import { requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
+import { listMeetings } from "@/lib/meeting-queries";
+import { fmtDay, fmtPlainDate, fmtTime, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
 import { isSimilar } from "@/lib/similar";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -46,6 +48,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
           .where(ne(schema.clients.id, id))
           .orderBy(asc(schema.clients.name))
       : [];
+  const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
   const activity =
     tab === "activity"
@@ -66,6 +69,9 @@ export default async function ClientPage({ params, searchParams }: { params: { i
         actions={
           <>
             <Badge tone={statusTone(client.status)}>{labelize(client.status)}</Badge>
+            <Link href={`/meetings/new?client=${id}`} className="btn-secondary">
+              New meeting
+            </Link>
             {editable && (
               <Link href={`${base}/edit`} className="btn-primary">
                 Edit client
@@ -227,9 +233,66 @@ export default async function ClientPage({ params, searchParams }: { params: { i
             </div>
           )}
 
-          {(tab === "meetings" || tab === "tasks") && (
+          {tab === "meetings" && (
+            <div className="card overflow-x-auto">
+              {meetings.length === 0 ? (
+                <Empty>
+                  No meetings with this client yet.{" "}
+                  <Link href={`/meetings/new?client=${id}`} className="link">
+                    Plan one
+                  </Link>
+                </Empty>
+              ) : (
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Meeting</th>
+                      <th>Status</th>
+                      <th>Next action</th>
+                      <th>Follow-up</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[...meetings].reverse().map((mt) => (
+                      <tr key={mt.id}>
+                        <td className="whitespace-nowrap">
+                          {mt.startAt ? (
+                            <>
+                              {fmtDay(mt.startAt)}
+                              <div className="text-xs text-slate-500">{fmtTime(mt.startAt)}</div>
+                            </>
+                          ) : (
+                            <span className="text-slate-400">Not set</span>
+                          )}
+                        </td>
+                        <td>
+                          <Link href={`/meetings/${mt.id}`} className="link">
+                            {TYPE_LABEL[mt.type]}
+                          </Link>
+                          <div className="max-w-xs text-xs text-slate-500">{mt.objective}</div>
+                        </td>
+                        <td>
+                          <Badge tone={STATUS_TONE[mt.status]}>{STATUS_LABEL[mt.status]}</Badge>
+                          {mt.briefStatus === "SUBMITTED" && (
+                            <Link href={`/meetings/${mt.id}/brief`} className="mt-1 block text-xs text-emerald-700 hover:underline">
+                              Brief ✓
+                            </Link>
+                          )}
+                        </td>
+                        <td className="max-w-xs text-slate-600">{mt.nextAction ?? "—"}</td>
+                        <td className="whitespace-nowrap">{fmtPlainDate(mt.followUpDate)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {tab === "tasks" && (
             <div className="card">
-              <Empty>{tab === "meetings" ? "Meeting history" : "Open tasks"} for this client arrive with the {tab === "meetings" ? "meeting planner (Phase 2)" : "task planner (Phase 3)"}.</Empty>
+              <Empty>Open tasks for this client arrive with the task planner (Phase 3).</Empty>
             </div>
           )}
 

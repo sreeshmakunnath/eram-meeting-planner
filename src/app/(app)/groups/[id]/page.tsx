@@ -5,6 +5,8 @@ import { Badge, Empty, fmtDate, labelize, Notice, PageHeader } from "@/component
 import { db, schema } from "@/db";
 import { deleteGroup } from "@/lib/actions/groups";
 import { requireUser } from "@/lib/auth";
+import { listMeetings } from "@/lib/meeting-queries";
+import { fmtDay, fmtTime, STATUS_CHIP, STATUS_LABEL } from "@/lib/meetings";
 
 export default async function GroupPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
   const me = await requireUser();
@@ -31,6 +33,7 @@ export default async function GroupPage({ params, searchParams }: { params: { id
     .where(eq(schema.groupMembers.groupId, id))
     .orderBy(asc(schema.users.fullName));
   if (me.role !== "ADMIN" && !members.some((m) => m.id === me.id)) redirect("/groups");
+  const meetings = (await listMeetings({ ...me, role: "ADMIN" }, { group: String(id), status: "OPEN" }, 10)).filter((x) => x.status !== "POSTPONED");
 
   return (
     <>
@@ -96,8 +99,25 @@ export default async function GroupPage({ params, searchParams }: { params: { id
             )}
           </section>
           <section className="card">
-            <h2 className="border-b border-slate-200 px-4 py-3 font-semibold text-navy">Upcoming meetings & open tasks</h2>
-            <Empty>Arrives with the meeting and task planner (Phases 2–3).</Empty>
+            <h2 className="border-b border-slate-200 px-4 py-3 font-semibold text-navy">Open meetings</h2>
+            {meetings.length ? (
+              <ul className="divide-y divide-slate-100 text-sm">
+                {meetings.map((mt) => (
+                  <li key={mt.id} className="flex items-center justify-between gap-2 px-4 py-2">
+                    <span>
+                      <Link href={`/meetings/${mt.id}`} className="link">
+                        {mt.client ?? mt.title}
+                      </Link>
+                      <span className="block text-xs text-slate-500">{mt.startAt ? `${fmtDay(mt.startAt)} · ${fmtTime(mt.startAt)}` : "Date not set"}</span>
+                    </span>
+                    <span className={`rounded border px-1.5 text-[11px] ${STATUS_CHIP[mt.status]}`}>{STATUS_LABEL[mt.status]}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <Empty>No open meetings assigned to this group.</Empty>
+            )}
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Open tasks arrive with the task planner (Phase 3).</p>
           </section>
         </div>
       </div>
