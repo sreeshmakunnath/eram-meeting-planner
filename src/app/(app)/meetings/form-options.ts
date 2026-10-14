@@ -8,7 +8,7 @@ export type ClientOption = {
   location: string;
   accountGroupId: number | null;
   buIds: number[];
-  contacts: { id: number; name: string; designation: string | null }[];
+  contacts: { id: number; name: string; designation: string | null; hasEmail: boolean }[];
 };
 export type MeetingFormOptions = Awaited<ReturnType<typeof meetingFormOptions>>;
 
@@ -21,7 +21,7 @@ export async function meetingFormOptions() {
       .where(ne(schema.clients.status, "INACTIVE"))
       .orderBy(asc(schema.clients.name)),
     db
-      .select({ id: schema.clientContacts.id, clientId: schema.clientContacts.clientId, name: schema.clientContacts.name, designation: schema.clientContacts.designation })
+      .select({ id: schema.clientContacts.id, clientId: schema.clientContacts.clientId, name: schema.clientContacts.name, designation: schema.clientContacts.designation, email: schema.clientContacts.email })
       .from(schema.clientContacts)
       .orderBy(asc(schema.clientContacts.name)),
     db.select().from(schema.clientBusinessUnits),
@@ -35,7 +35,7 @@ export async function meetingFormOptions() {
     location: [c.city, c.country].filter(Boolean).join(", "),
     accountGroupId: c.accountGroupId,
     buIds: cbus.filter((b) => b.clientId === c.id).map((b) => b.businessUnitId),
-    contacts: contacts.filter((x) => x.clientId === c.id).map(({ id, name, designation }) => ({ id, name, designation })),
+    contacts: contacts.filter((x) => x.clientId === c.id).map(({ id, name, designation, email }) => ({ id, name, designation, hasEmail: !!email?.trim() })),
   }));
   return { clients: clientOptions, users, groups, bus };
 }

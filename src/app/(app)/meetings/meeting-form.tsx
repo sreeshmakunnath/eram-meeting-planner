@@ -224,7 +224,7 @@ export function MeetingForm({
         </div>
         {effectiveStatus !== status && <p className="mt-2 text-xs text-brand-600">A date is set, so this will be saved as Scheduled.</p>}
         {["SCHEDULED", "CONFIRMED"].includes(effectiveStatus) && date && (
-          <p className="mt-2 text-xs text-slate-500">ERAM attendees get an email with a calendar invite (.ics) when you save.</p>
+          <p className="mt-2 text-xs text-slate-500">ERAM and client attendees get an email with a calendar invite (.ics) when you save, and an update when the details change.</p>
         )}
       </Box>
 
@@ -233,7 +233,7 @@ export function MeetingForm({
           {client ? (
             <Checks
               name="contactIds"
-              items={client.contacts.map((c) => ({ id: c.id, label: c.name, hint: c.designation ?? undefined }))}
+              items={client.contacts.map((c) => ({ id: c.id, label: c.name, hint: [c.designation, c.hasEmail ? null : "no email, won't get the invite"].filter(Boolean).join(" · ") || undefined }))}
               selected={contactIds}
               onChange={setContactIds}
             />
@@ -242,6 +242,7 @@ export function MeetingForm({
           )}
           <L label="Other client attendees" className="mt-3">
             <input name="clientContactsText" className="input" defaultValue={defaults.clientContactsText ?? ""} maxLength={500} placeholder="Names not in the client's contact list" />
+            <span className="mt-1 block text-xs text-slate-500">Include email addresses (e.g. Ahmed &lt;ahmed@client.com&gt;) to send them the invite.</span>
           </L>
         </Box>
         <Box title="ERAM attendees" hint="Pick groups, people, or both. Group members are added as attendees.">

@@ -46,57 +46,111 @@ async function resolveAttendees(userIds: number[], groupIds: number[]) {
   return map;
 }
 
-/** Sends the meeting invite / update / cancellation (with .ics) to the given users. */
-export async function notifyMeeting(meetingId: number, userIds: number[], method: "REQUEST" | "CANCEL", reason: string) {
-  if (!userIds.length) return;
+type External = { name: string | null; email: string };
+const EMAIL_RE = /[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[a-z]{2,}/gi;
+const emailKey = (e: External) => e.email.toLowerCase();
+
+/** Client-side attendees who get the invite: ticked contacts that have an email, plus any address typed in "Other client attendees". */
+async function externalAttendees(meetingId: number): Promise<External[]> {
+  const [m] = await db.select({ text: schema.meetings.clientContactsText }).from(schema.meetings).where(eq(schema.meetings.id, meetingId));
+  const contacts = await db
+    .select({ name: schema.clientContacts.name, email: schema.clientContacts.email })
+    .from(schema.meetingContacts)
+    .innerJoin(schema.clientContacts, eq(schema.meetingContacts.contactId, schema.clientContacts.id))
+    .where(eq(schema.meetingContacts.meetingId, meetingId));
+  const map = new Map<string, External>();
+  for (const c of contacts) if (c.email?.trim()) map.set(c.email.trim().toLowerCase(), { name: c.name, email: c.email.trim() });
+  for (const email of m?.text?.match(EMAIL_RE) ?? []) if (!map.has(email.toLowerCase())) map.set(email.toLowerCase(), { name: null, email });
+  return [...map.values()];
+}
+
+/** Sends the meeting invite / update / cancellation (with .ics) to the given users and outside attendees. */
+export async function notifyMeeting(meetingId: number, userIds: number[], method: "REQUEST" | "CANCEL", reason: string, external: External[] = []) {
+  if (!userIds.length && !external.length) return;
   const m = await db.query.meetings.findFirst({
     where: eq(schema.meetings.id, meetingId),
     with: { client: { columns: { name: true } }, organiser: { columns: { fullName: true, email: true } } },
   });
   if (!m || !m.startAt) return;
-  const people = await db
-    .select({ id: schema.users.id, fullName: schema.users.fullName, email: schema.users.email })
-    .from(schema.users)
-    .where(inArray(schema.users.id, userIds));
+  const people = userIds.length
+    ? await db
+        .select({ id: schema.users.id, fullName: schema.users.fullName, email: schema.users.email })
+        .from(schema.users)
+        .where(inArray(schema.users.id, userIds))
+    : [];
   const allAttendees = await db
     .select({ fullName: schema.users.fullName, email: schema.users.email })
     .from(schema.meetingAttendees)
     .innerJoin(schema.users, eq(schema.meetingAttendees.userId, schema.users.id))
     .where(eq(schema.meetingAttendees.meetingId, meetingId));
+  const internalEmails = new Set([...people, ...allAttendees].map((p) => p.email.toLowerCase()));
+  const outside = external.filter((e) => !internalEmails.has(emailKey(e))); // an ERAM address typed as a client contact gets the internal email only
+  const allOutside = await externalAttendees(meetingId);
   const end = m.endAt ?? new Date(m.startAt.getTime() + 3600_000);
   const where = [MODE_LABEL[m.mode], m.venue].filter(Boolean).join(" · ");
-  const ics = buildIcs({
-    meetingId,
-    sequence: m.icsSequence,
-    method,
-    title: m.title,
-    start: m.startAt,
-    end,
-    location: where,
-    description: `${m.objective}\n\n${appUrl(`/meetings/${meetingId}`)}`,
-    organiser: { name: m.organiser.fullName, email: m.organiser.email },
-    attendees: allAttendees.map((a) => ({ name: a.fullName, email: a.email })),
-  });
+  const ics = (description: string) =>
+    buildIcs({
+      meetingId,
+      sequence: m.icsSequence,
+      method,
+      title: m.title,
+      start: m.startAt!,
+      end,
+      location: where,
+      description,
+      organiser: { name: m.organiser.fullName, email: m.organiser.email },
+      attendees: [
+        ...allAttendees.map((a) => ({ name: a.fullName, email: a.email })),
+        ...allOutside.filter((e) => !internalEmails.has(emailKey(e))).map((e) => ({ name: e.name ?? e.email, email: e.email })),
+      ],
+    });
   const when = `${fmtDay(m.startAt)}, ${fmtTime(m.startAt)}–${fmtTime(end)} (KSA time)`;
   const verb = method === "CANCEL" ? "Cancelled" : reason;
-  const rows = [
-    ["When", when],
-    ["Where", where || "—"],
-    ["Client", m.client?.name ?? "—"],
-    ["Organiser", m.organiser.fullName],
-    ["Objective / agenda", m.objective],
-    ["Documents", m.documents ?? "—"],
-  ]
-    .map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:4px 0">${esc(v).replace(/\n/g, "<br>")}</td></tr>`)
-    .join("");
-  for (const p of people) {
-    await sendMail(
-      p.email,
-      `${verb}: ${m.title} — ${fmtDay(m.startAt)} ${fmtTime(m.startAt)}`,
-      `${verb}: ${esc(m.title)}`,
-      `<p>Hello ${esc(p.fullName)},</p><table style="font-size:14px;border-collapse:collapse">${rows}</table>${button(appUrl(`/meetings/${meetingId}`), "Open meeting")}<p style="font-size:12px;color:#6b7280">The attached invite adds this to your Outlook calendar.</p>`,
-      { ics: { method, content: ics } },
-    );
+  const subject = `${verb}: ${m.title} — ${fmtDay(m.startAt)} ${fmtTime(m.startAt)}`;
+  const table = (rows: string[][]) =>
+    `<table style="font-size:14px;border-collapse:collapse">${rows
+      .map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:4px 0">${esc(v).replace(/\n/g, "<br>")}</td></tr>`)
+      .join("")}</table>`;
+
+  if (people.length) {
+    const rows = table([
+      ["When", when],
+      ["Where", where || "—"],
+      ["Client", m.client?.name ?? "—"],
+      ["Organiser", m.organiser.fullName],
+      ["Objective / agenda", m.objective],
+      ["Documents", m.documents ?? "—"],
+    ]);
+    const content = ics(`${m.objective}\n\n${appUrl(`/meetings/${meetingId}`)}`);
+    for (const p of people) {
+      await sendMail(
+        p.email,
+        subject,
+        `${verb}: ${esc(m.title)}`,
+        `<p>Hello ${esc(p.fullName)},</p>${rows}${button(appUrl(`/meetings/${meetingId}`), "Open meeting")}<p style="font-size:12px;color:#6b7280">The attached invite adds this to your Outlook calendar.</p>`,
+        { ics: { method, content } },
+      );
+    }
+  }
+
+  // Outside attendees: no app link and no internal fields (they can't sign in).
+  if (outside.length) {
+    const rows = table([
+      ["When", when],
+      ["Where", where || "—"],
+      ["Organiser", `${m.organiser.fullName}, ERAM Holdings`],
+      ["Agenda", m.objective],
+    ]);
+    const content = ics(m.objective);
+    for (const e of outside) {
+      await sendMail(
+        e.email,
+        subject,
+        `${verb}: ${esc(m.title)}`,
+        `<p>${e.name ? `Dear ${esc(e.name)},` : "Hello,"}</p>${rows}<p style="font-size:12px;color:#6b7280">The attached invite adds this to your calendar. To reply, please contact ${esc(m.organiser.fullName)} at ${esc(m.organiser.email)}.</p>`,
+        { ics: { method, content } },
+      );
+    }
   }
 }
 
@@ -108,6 +162,7 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     const before = id ? await db.query.meetings.findFirst({ where: eq(schema.meetings.id, id), with: { attendees: true } }) : undefined;
     if (id && !before) throw new FormError("Meeting not found.");
     if (before && !canEditMeeting(me, before)) throw new FormError("Only the organiser or an Admin can edit this meeting.");
+    const externalBefore = before ? await externalAttendees(before.id) : [];
 
     // Client: existing, or quick-add a new one (pending review for Users).
     let clientId: number | null = null;
@@ -164,7 +219,10 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
 
     const timeChanged =
       !!before && (before.startAt?.getTime() !== startAt?.getTime() || before.endAt?.getTime() !== endAt?.getTime() || before.venue !== data.venue || before.mode !== data.mode);
-    const sequence = before ? before.icsSequence + (timeChanged ? 1 : 0) : 0;
+    // Anything shown in the invite: attendees get an "Updated" email and their calendar entry is updated.
+    const inviteFields = ["title", "clientId", "location", "objective", "documents"] as const;
+    const detailsChanged = !!before && (timeChanged || inviteFields.some((f) => String(before[f] ?? "") !== String(data[f] ?? "")));
+    const sequence = before ? before.icsSequence + (detailsChanged ? 1 : 0) : 0;
 
     if (before) {
       await db.update(schema.meetings).set({ ...data, icsSequence: sequence }).where(eq(schema.meetings.id, before.id));
@@ -221,13 +279,18 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     const live = LIVE.includes(status) && !!startAt;
     const wasLive = !!before && LIVE.includes(before.status) && !!before.startAt;
     const everyone = [...wanted.keys()];
-    if (live && (!wasLive || timeChanged)) await notifyMeeting(meetingId, everyone, "REQUEST", wasLive ? "Updated" : "Meeting scheduled");
-    else if (live && added.length) await notifyMeeting(meetingId, added, "REQUEST", "Meeting invitation");
+    const external = await externalAttendees(meetingId);
+    const keysBefore = new Set(externalBefore.map(emailKey));
+    const keysNow = new Set(external.map(emailKey));
+    const externalAdded = external.filter((e) => !keysBefore.has(emailKey(e)));
+    const externalRemoved = externalBefore.filter((e) => !keysNow.has(emailKey(e)));
+    if (live && (!wasLive || detailsChanged)) await notifyMeeting(meetingId, everyone, "REQUEST", wasLive ? "Updated" : "Meeting scheduled", external);
+    else if (live && (added.length || externalAdded.length)) await notifyMeeting(meetingId, added, "REQUEST", "Meeting invitation", externalAdded);
     if (wasLive && (status === "CANCELLED" || status === "POSTPONED")) {
       await db.update(schema.meetings).set({ icsSequence: sequence + 1 }).where(eq(schema.meetings.id, meetingId));
-      await notifyMeeting(meetingId, everyone, "CANCEL", "Cancelled");
+      await notifyMeeting(meetingId, [...everyone, ...removed], "CANCEL", "Cancelled", [...external, ...externalRemoved]);
     }
-    if (live && removed.length) await notifyMeeting(meetingId, removed, "CANCEL", "Cancelled");
+    if (live && (removed.length || externalRemoved.length)) await notifyMeeting(meetingId, removed, "CANCEL", "Cancelled", externalRemoved);
   } catch (e) {
     return toFormError(e);
   }
@@ -249,8 +312,9 @@ export async function setMeetingStatus(id: number, status: MeetingStatus) {
   await db.update(schema.meetings).set({ status, icsSequence: status === "CANCELLED" ? m.icsSequence + 1 : m.icsSequence }).where(eq(schema.meetings.id, id));
   await logActivity(id, me.id, "STATUS_CHANGED", { from: m.status, to: status });
   const everyone = m.attendees.map((a) => a.userId);
-  if (status === "CANCELLED" && LIVE.includes(m.status)) await notifyMeeting(id, everyone, "CANCEL", "Cancelled");
-  if (status === "CONFIRMED" && m.status !== "CONFIRMED") await notifyMeeting(id, everyone, "REQUEST", "Confirmed");
+  const external = await externalAttendees(id);
+  if (status === "CANCELLED" && LIVE.includes(m.status)) await notifyMeeting(id, everyone, "CANCEL", "Cancelled", external);
+  if (status === "CONFIRMED" && m.status !== "CONFIRMED") await notifyMeeting(id, everyone, "REQUEST", "Confirmed", external);
   revalidatePath("/meetings");
   redirect(status === "COMPLETED" ? `/meetings/${id}/brief?msg=completed` : `/meetings/${id}?msg=status`);
 }
@@ -259,7 +323,7 @@ export async function deleteMeeting(id: number) {
   const me = await requireUser();
   if (me.role !== "ADMIN") redirect(`/meetings/${id}?msg=denied`);
   const m = await loadEditable(me, id);
-  if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled");
+  if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled", await externalAttendees(id));
   await db.update(schema.meetingBriefs).set({ followUpMeetingId: null }).where(eq(schema.meetingBriefs.followUpMeetingId, id));
   await db.update(schema.meetings).set({ parentMeetingId: null }).where(eq(schema.meetings.parentMeetingId, id));
   await db.delete(schema.meetings).where(eq(schema.meetings.id, id));
