@@ -5,7 +5,7 @@ import { MEETING_STATUSES, PRIORITIES, riyadh, visibleTo, type MeetingStatus } f
 
 export type MeetingFilters = {
   q?: string;
-  status?: string; // a status, "OPEN" (not completed/cancelled) or "ALL"
+  status?: string; // a status, "OPEN" (not completed/cancelled) or "ALL" (default)
   priority?: string;
   client?: string;
   user?: string; // attendee
@@ -22,7 +22,7 @@ export function meetingWhere(me: SessionUser, f: MeetingFilters): SQL | undefine
     const q = `%${f.q}%`;
     where.push(or(ilike(m.title, q), ilike(m.objective, q), ilike(m.location, q), ilike(schema.clients.name, q)));
   }
-  const status = f.status ?? "OPEN";
+  const status = f.status ?? "ALL";
   if (status === "OPEN") where.push(notInArray(m.status, ["COMPLETED", "CANCELLED"]));
   else if ((MEETING_STATUSES as readonly string[]).includes(status)) where.push(eq(m.status, status as MeetingStatus));
   if (f.priority && (PRIORITIES as readonly string[]).includes(f.priority)) where.push(eq(m.priority, f.priority as (typeof PRIORITIES)[number]));

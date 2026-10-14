@@ -152,11 +152,12 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
                     <td className="min-w-[14rem] max-w-xs text-slate-600">
                       {r.nextAction ?? "—"}
                       {r.actionOwners && <div className="text-xs text-slate-500">Owner: {r.actionOwners}</div>}
-                      {r.agreedActions > 0 && (
-                        <div className="text-xs text-slate-500">
-                          {r.agreedActions} agreed action{r.agreedActions === 1 ? "" : "s"}
+                      {r.openTasks > 0 && (
+                        <Link href={`/clients/${r.id}?tab=tasks`} className="block text-xs text-slate-500 hover:underline">
+                          {r.openTasks} open task{r.openTasks === 1 ? "" : "s"}
+                          {r.overdueTasks ? <span className="font-semibold text-red-600"> · {r.overdueTasks} overdue</span> : ""}
                           {r.nextDeadline ? ` · next due ${fmtPlainDate(r.nextDeadline)}` : ""}
-                        </div>
+                        </Link>
                       )}
                     </td>
                     <td className={`whitespace-nowrap ${r.flag === "OVERDUE" ? "font-semibold text-red-600" : ""}`}>{fmtPlainDate(r.followUp)}</td>

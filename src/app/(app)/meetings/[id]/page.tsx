@@ -5,6 +5,8 @@ import { Badge, Empty, fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@
 import { db, schema } from "@/db";
 import { deleteMeeting, setMeetingStatus } from "@/lib/actions/meetings";
 import { requireUser } from "@/lib/auth";
+import { TaskMiniList } from "@/components/task-mini-list";
+import { listTasks } from "@/lib/task-queries";
 import {
   canEditMeeting,
   canView,
@@ -104,6 +106,7 @@ export default async function MeetingPage({ params, searchParams }: { params: { 
       : [],
   ]);
 
+  const meetingTasks = await listTasks(me, { scope: "all", bucket: "any", meeting: String(id) });
   const when = m.startAt ? `${fmtDay(m.startAt)} · ${fmtTime(m.startAt)}–${fmtTime(m.endAt)} (KSA)` : "Date not set";
   const open = !["COMPLETED", "CANCELLED"].includes(m.status);
   const attendees = [...m.attendees].sort((a, b) => a.user.fullName.localeCompare(b.user.fullName));
@@ -213,7 +216,8 @@ export default async function MeetingPage({ params, searchParams }: { params: { 
               </Row>
             )}
           </dl>
-          <section className="card self-start">
+          <div className="space-y-6 self-start">
+          <section className="card">
             <h2 className="border-b border-slate-200 px-4 py-3 font-semibold text-navy">ERAM attendees ({attendees.length})</h2>
             {m.groups.length > 0 && (
               <div className="flex flex-wrap gap-1 border-b border-slate-100 px-4 py-2">
@@ -241,6 +245,11 @@ export default async function MeetingPage({ params, searchParams }: { params: { 
               <Empty>No ERAM attendees yet.</Empty>
             )}
           </section>
+          <section className="card">
+            <h2 className="border-b border-slate-200 px-4 py-3 font-semibold text-navy">Tasks ({meetingTasks.length})</h2>
+            <TaskMiniList rows={meetingTasks} empty="No tasks yet. Agreed actions from the brief appear here." newHref={`/tasks/new?meeting=${id}`} />
+          </section>
+          </div>
         </div>
       )}
 

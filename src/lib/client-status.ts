@@ -2,6 +2,7 @@ import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { SessionUser } from "./auth";
 import { todayRiyadh, visibleTo, type MeetingStatus } from "./meetings";
+import { OPEN_STATUSES, taskVisibleTo } from "./tasks";
 
 export const FLAGS = {
   OVERDUE: { label: "Follow-up overdue", tone: "red" },
@@ -64,10 +65,9 @@ export async function clientStatusRows(me: SessionUser) {
       .from(schema.meetingActionOwners)
       .innerJoin(schema.users, eq(schema.meetingActionOwners.userId, schema.users.id)),
     db
-      .select({ meetingId: schema.meetingBriefs.meetingId, deadline: schema.briefActions.deadline })
-      .from(schema.briefActions)
-      .innerJoin(schema.meetingBriefs, eq(schema.briefActions.briefId, schema.meetingBriefs.id))
-      .where(inArray(schema.meetingBriefs.status, ["SUBMITTED"])),
+      .select({ clientId: schema.tasks.clientId, dueDate: schema.tasks.dueDate })
+      .from(schema.tasks)
+      .where(and(inArray(schema.tasks.status, OPEN_STATUSES), taskVisibleTo(me))),
   ]);
 
   const byClient = new Map<number, M[]>();
@@ -87,8 +87,10 @@ export async function clientStatusRows(me: SessionUser) {
       [...list].filter((m) => m.nextAction).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
     const followUps = open.map((m) => m.followUpDate?.slice(0, 10)).filter((d): d is string => !!d).sort();
     const followUp = followUps[0] ?? null;
-    const briefActions = actions.filter((a) => list.some((m) => m.id === a.meetingId));
-    const nextDeadline = briefActions.map((a) => a.deadline?.slice(0, 10)).filter((d): d is string => !!d && d >= today).sort()[0] ?? null;
+    const openTasks = actions.filter((a) => a.clientId === c.id);
+    const dues = openTasks.map((a) => a.dueDate?.slice(0, 10)).filter((d): d is string => !!d);
+    const nextDeadline = dues.filter((d) => d >= today).sort()[0] ?? null;
+    const overdueTasks = dues.filter((d) => d < today).length;
 
     let flag: Flag;
     if (!list.length) flag = "NO_MEETING";
@@ -111,7 +113,8 @@ export async function clientStatusRows(me: SessionUser) {
       actionOwners: actionSource ? owners.filter((o) => o.meetingId === actionSource.id).map((o) => o.name).join(", ") : "",
       actionMeetingId: actionSource?.id ?? null,
       followUp,
-      agreedActions: briefActions.length,
+      openTasks: openTasks.length,
+      overdueTasks,
       nextDeadline,
       flag,
     };

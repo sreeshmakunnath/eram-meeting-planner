@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
+import { syncBriefTasks } from "@/lib/brief-tasks";
+import { notifyTaskAssigned } from "@/lib/tasks";
 import { FormError, int, ints, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { canEditMeeting, canWriteBrief, fmtDay, fmtPlainDate, fmtTime, logActivity } from "@/lib/meetings";
@@ -36,8 +38,10 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
     const actions = fd.getAll("actionText").map(String);
     const owners = fd.getAll("actionOwner").map(String);
     const deadlines = fd.getAll("actionDeadline").map(String);
+    const actionIds = fd.getAll("actionId").map((v) => Number(v) || null);
     const rows = actions
       .map((a, i) => ({
+        id: actionIds[i] ?? null,
         action: a.trim(),
         ownerUserId: owners[i]?.startsWith("u:") ? Number(owners[i].slice(2)) : null,
         ownerGroupId: owners[i]?.startsWith("g:") ? Number(owners[i].slice(2)) : null,
@@ -62,8 +66,15 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
       const [b] = await db.insert(schema.meetingBriefs).values({ meetingId, ...values }).returning();
       briefId = b.id;
     }
-    await db.delete(schema.briefActions).where(eq(schema.briefActions.briefId, briefId));
-    if (rows.length) await db.insert(schema.briefActions).values(rows.map((r) => ({ ...r, briefId })));
+    // Keep each action's row (and id) stable so its task stays linked when the brief is edited
+    const current = await db.select({ id: schema.briefActions.id }).from(schema.briefActions).where(eq(schema.briefActions.briefId, briefId));
+    const keepIds = rows.map((r) => r.id).filter((x): x is number => !!x && current.some((c) => c.id === x));
+    const removedIds = current.map((c) => c.id).filter((x) => !keepIds.includes(x));
+    if (removedIds.length) await db.delete(schema.briefActions).where(inArray(schema.briefActions.id, removedIds));
+    for (const { id: rowId, ...r } of rows) {
+      if (rowId && keepIds.includes(rowId)) await db.update(schema.briefActions).set(r).where(eq(schema.briefActions.id, rowId));
+      else await db.insert(schema.briefActions).values({ ...r, briefId });
+    }
 
     // Attendance marks
     const attended = ints(fd, "attended");
@@ -110,6 +121,9 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
         await logActivity(f.id, me.id, "CREATED", { status: "TO_BE_SCHEDULED", from: `brief of meeting #${meetingId}` });
       }
       await emailBrief(meetingId);
+      // Every agreed action becomes (or updates) a task in the task planner
+      const synced = await syncBriefTasks(db, briefId, me.id);
+      for (const c of synced.created) await notifyTaskAssigned(c.taskId, c.userIds, me.name);
     }
   } catch (e) {
     return toFormError(e);

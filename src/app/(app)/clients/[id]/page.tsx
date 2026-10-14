@@ -8,6 +8,8 @@ import { addContact, approveClient, deleteContact, mergeClient, setPrimaryContac
 import { requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 import { listMeetings } from "@/lib/meeting-queries";
+import { listTasks } from "@/lib/task-queries";
+import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtPlainDate, fmtTime, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
 import { isSimilar } from "@/lib/similar";
 
@@ -49,6 +51,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
           .orderBy(asc(schema.clients.name))
       : [];
   const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
+  const clientTasks = tab === "tasks" ? await listTasks(me, { scope: "all", bucket: "any", client: String(id) }) : [];
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
   const activity =
     tab === "activity"
@@ -160,7 +163,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
             items={[
               { href: `${base}?tab=contacts`, label: `Contacts (${client.contacts.length})` },
               { href: `${base}?tab=meetings`, label: "Meetings" },
-              { href: `${base}?tab=tasks`, label: "Open tasks" },
+              { href: `${base}?tab=tasks`, label: "Tasks" },
               { href: `${base}?tab=activity`, label: "Activity" },
             ]}
           />
@@ -292,7 +295,11 @@ export default async function ClientPage({ params, searchParams }: { params: { i
 
           {tab === "tasks" && (
             <div className="card">
-              <Empty>Open tasks for this client arrive with the task planner (Phase 3).</Empty>
+              <TaskMiniList
+                rows={[...clientTasks.filter((t) => t.status !== "COMPLETED" && t.status !== "CANCELLED"), ...clientTasks.filter((t) => t.status === "COMPLETED")]}
+                empty="No tasks for this client yet."
+                newHref={`/tasks/new?client=${id}`}
+              />
             </div>
           )}
 

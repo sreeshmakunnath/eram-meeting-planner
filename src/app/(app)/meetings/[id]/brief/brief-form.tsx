@@ -4,7 +4,7 @@ import { useFormState, useFormStatus } from "react-dom";
 import type { ActionState } from "@/components/action-form";
 
 type Owner = { value: string; label: string };
-type ActionRow = { key: number; action: string; owner: string; deadline: string };
+type ActionRow = { key: number; id: number | null; action: string; owner: string; deadline: string };
 
 export type BriefDefaults = {
   meetingId: number;
@@ -55,7 +55,7 @@ export function BriefForm({
 }) {
   const [state, formAction] = useFormState(action, undefined);
   const [rows, setRows] = useState<ActionRow[]>(
-    (defaults.actions.length ? defaults.actions : [{ action: "", owner: "", deadline: "" }]).map((a, i) => ({ ...a, key: i })),
+    (defaults.actions.length ? defaults.actions : [{ id: null, action: "", owner: "", deadline: "" }]).map((a, i) => ({ ...a, key: i })),
   );
   const update = (key: number, patch: Partial<ActionRow>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
 
@@ -104,6 +104,7 @@ export function BriefForm({
         <div className="space-y-2">
           {rows.map((r, i) => (
             <div key={r.key} className="grid gap-2 md:grid-cols-12">
+              <input type="hidden" name="actionId" value={r.id ?? ""} />
               <input name="actionText" value={r.action} onChange={(e) => update(r.key, { action: e.target.value })} placeholder={`Action ${i + 1}`} className="input md:col-span-6" />
               <select name="actionOwner" value={r.owner} onChange={(e) => update(r.key, { owner: e.target.value })} className="input md:col-span-3">
                 <option value="">Owner…</option>
@@ -119,7 +120,7 @@ export function BriefForm({
               </button>
             </div>
           ))}
-          <button type="button" onClick={() => setRows((rs) => [...rs, { key: Date.now(), action: "", owner: "", deadline: "" }])} className="text-sm font-medium text-brand hover:underline">
+          <button type="button" onClick={() => setRows((rs) => [...rs, { key: Date.now(), id: null, action: "", owner: "", deadline: "" }])} className="text-sm font-medium text-brand hover:underline">
             + Add action
           </button>
         </div>

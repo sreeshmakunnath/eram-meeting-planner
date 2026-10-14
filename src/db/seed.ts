@@ -2,14 +2,14 @@
 import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
+import { makePool } from "./pool";
 import * as schema from "./schema";
 
 try {
   process.loadEnvFile(".env");
 } catch {}
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = makePool(1);
 const db = drizzle(pool, { schema });
 
 const branchNames = ["Al Khobar", "Dammam", "Riyadh", "Jubail"];

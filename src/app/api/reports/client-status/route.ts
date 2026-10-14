@@ -31,7 +31,8 @@ export async function GET(req: Request) {
       { header: "Next Action", width: 40 },
       { header: "Action Owner", width: 22 },
       { header: "Follow-up Date", width: 14 },
-      { header: "Agreed Actions", width: 10 },
+      { header: "Open Tasks", width: 10 },
+      { header: "Overdue Tasks", width: 10 },
       { header: "Meetings (done / total)", width: 14 },
     ],
     rows: rows.map((r) => [
@@ -47,7 +48,8 @@ export async function GET(req: Request) {
       r.nextAction,
       r.actionOwners,
       xlDate(r.followUp),
-      r.agreedActions,
+      r.openTasks,
+      r.overdueTasks,
       `${r.completed} / ${r.meetings}`,
     ]),
   });

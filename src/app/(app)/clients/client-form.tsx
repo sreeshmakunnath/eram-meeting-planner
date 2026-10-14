@@ -60,6 +60,14 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
             ))}
           </select>
         </Field>
+        <Field label="Target batch" hint='BD Target Schedule batch, e.g. "Batch 1".'>
+          <input name="targetBatch" className="input" defaultValue={client?.targetBatch ?? ""} maxLength={50} list="batches" />
+          <datalist id="batches">
+            <option value="Batch 1" />
+            <option value="Batch 2" />
+            <option value="Batch 3" />
+          </datalist>
+        </Field>
         <Field label="Account owner" hint="Main ERAM contact for this client.">
           <select name="accountOwnerId" className="input" defaultValue={client?.accountOwnerId ?? ""}>
             <option value="">—</option>

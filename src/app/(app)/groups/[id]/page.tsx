@@ -6,6 +6,8 @@ import { db, schema } from "@/db";
 import { deleteGroup } from "@/lib/actions/groups";
 import { requireUser } from "@/lib/auth";
 import { listMeetings } from "@/lib/meeting-queries";
+import { listTasks } from "@/lib/task-queries";
+import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtTime, STATUS_CHIP, STATUS_LABEL } from "@/lib/meetings";
 
 export default async function GroupPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
@@ -34,6 +36,7 @@ export default async function GroupPage({ params, searchParams }: { params: { id
     .orderBy(asc(schema.users.fullName));
   if (me.role !== "ADMIN" && !members.some((m) => m.id === me.id)) redirect("/groups");
   const meetings = (await listMeetings({ ...me, role: "ADMIN" }, { group: String(id), status: "OPEN" }, 10)).filter((x) => x.status !== "POSTPONED");
+  const groupTasks = await listTasks({ ...me, role: "ADMIN" }, { scope: "all", bucket: "open", group: String(id) }, 15);
 
   return (
     <>
@@ -117,7 +120,10 @@ export default async function GroupPage({ params, searchParams }: { params: { id
             ) : (
               <Empty>No open meetings assigned to this group.</Empty>
             )}
-            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Open tasks arrive with the task planner (Phase 3).</p>
+          </section>
+          <section className="card">
+            <h2 className="border-b border-slate-200 px-4 py-3 font-semibold text-navy">Open tasks</h2>
+            <TaskMiniList rows={groupTasks} empty="No open tasks assigned to this group." />
           </section>
         </div>
       </div>

@@ -14,10 +14,14 @@ export function Sidebar({ name, role }: { name: string; role: "ADMIN" | "USER" }
     { href: "/", label: "Dashboard" },
     { href: "/meetings", label: "Meetings" },
     { href: "/meetings/calendar", label: "Calendar" },
-    { href: "/reports/client-status", label: "Client status" },
-    { href: "/tasks", label: "Tasks", soon: "Phase 3" },
+    { href: "/tasks", label: "Tasks" },
     { href: "/clients", label: "Clients" },
     { href: "/groups", label: "Groups" },
+  ];
+  const reports: Item[] = [
+    { href: "/reports/client-status", label: "Client status" },
+    { href: "/reports/target-schedule", label: "Target schedule" },
+    { href: "/reports/tasks", label: "Task report" },
   ];
   const admin: Item[] = [
     { href: "/admin/users", label: "Users" },
@@ -43,7 +47,7 @@ export function Sidebar({ name, role }: { name: string; role: "ADMIN" | "USER" }
     );
 
   return (
-    <aside className="flex w-full flex-col bg-navy text-white md:min-h-screen md:w-60">
+    <aside className="flex w-full flex-col bg-navy text-white md:min-h-screen md:w-60 md:shrink-0">
       <div className="flex items-center justify-between px-5 py-4 md:py-5">
         <div>
           <div className="text-[11px] uppercase tracking-[0.2em] text-white/60">ERAM Holdings</div>
@@ -55,6 +59,8 @@ export function Sidebar({ name, role }: { name: string; role: "ADMIN" | "USER" }
       </div>
       <nav className={`flex-1 space-y-1 px-3 pb-3 ${open ? "block" : "hidden"} md:block`}>
         {main.map(link)}
+        <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-white/50">Reports</div>
+        {reports.map(link)}
         {role === "ADMIN" && (
           <>
             <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-white/50">Administration</div>

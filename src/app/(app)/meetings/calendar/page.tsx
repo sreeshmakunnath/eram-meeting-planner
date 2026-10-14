@@ -4,10 +4,11 @@ import { Badge, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { meetingsBetween, toBeScheduled } from "@/lib/meeting-queries";
+import { tasksDueBetween } from "@/lib/task-queries";
 import { fmtPlainDate, fmtTime, riyadh, riyadhParts, STATUS_CHIP, STATUS_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeGroups, activeUsers } from "@/lib/queries";
 
-type Search = { month?: string; view?: string; user?: string; group?: string; client?: string };
+type Search = { month?: string; view?: string; user?: string; group?: string; client?: string; tasks?: string };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -52,13 +53,21 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
   if (searchParams.client) extra.push(eq(m.clientId, Number(searchParams.client)));
   const filter = extra.length ? and(...extra) : undefined;
 
-  const [meetings, pending, users, groups, clients] = await Promise.all([
+  const showTasks = searchParams.tasks !== "0";
+  const taskFilter = searchParams.client ? eq(schema.tasks.clientId, Number(searchParams.client)) : undefined;
+  const [meetings, pending, users, groups, clients, dueTasks] = await Promise.all([
     meetingsBetween(me, riyadh(gridStart, "00:00"), riyadh(gridEnd, "00:00"), filter),
     toBeScheduled(me, filter),
     activeUsers(),
     activeGroups(),
     db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),
+    showTasks && !searchParams.user && !searchParams.group ? tasksDueBetween(me, gridStart, gridEnd, taskFilter) : Promise.resolve([]),
   ]);
+  const tasksByDay = new Map<string, typeof dueTasks>();
+  for (const t of dueTasks) {
+    const d = t.dueDate!.slice(0, 10);
+    tasksByDay.set(d, [...(tasksByDay.get(d) ?? []), t]);
+  }
   const byDay = new Map<string, typeof meetings>();
   for (const x of meetings) {
     const d = riyadhParts(x.startAt!).date;
@@ -129,6 +138,9 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
             </option>
           ))}
         </select>
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input type="checkbox" name="tasks" value="0" defaultChecked={!showTasks} className="accent-brand" /> Hide task due dates
+        </label>
         <select name="client" defaultValue={searchParams.client ?? ""} className="input max-w-[14rem]">
           <option value="">Any client</option>
           {clients.map((c) => (
@@ -173,9 +185,19 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
                             <b>{fmtTime(x.startAt)}</b> {x.client ?? x.title}
                           </Link>
                         ))}
-                        {list.length > 4 && (
+                        {(tasksByDay.get(d) ?? []).slice(0, Math.max(0, 4 - list.length)).map((t) => (
+                          <Link
+                            key={`t${t.id}`}
+                            href={`/tasks/${t.id}`}
+                            title={`Task due: ${t.title}`}
+                            className={`block truncate rounded border border-dashed px-1.5 py-0.5 text-[11px] leading-tight ${t.status === "COMPLETED" ? "border-emerald-300 text-emerald-700 line-through" : t.dueDate!.slice(0, 10) < today ? "border-red-300 text-red-700" : "border-slate-300 text-slate-600"}`}
+                          >
+                            ☐ {t.title}
+                          </Link>
+                        ))}
+                        {list.length + (tasksByDay.get(d)?.length ?? 0) > 4 && (
                           <Link href={href({ view: "agenda" })} className="block px-1 text-[11px] text-slate-500">
-                            +{list.length - 4} more
+                            +{list.length + (tasksByDay.get(d)?.length ?? 0) - 4} more
                           </Link>
                         )}
                       </div>
@@ -215,6 +237,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
                 {STATUS_LABEL[s]}
               </span>
             ))}
+            {showTasks && <span className="rounded border border-dashed border-slate-300 px-1.5 py-0.5 text-slate-600">☐ Task due</span>}
           </div>
         </div>
 

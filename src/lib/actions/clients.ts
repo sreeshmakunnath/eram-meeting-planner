@@ -28,6 +28,7 @@ function readClient(fd: FormData) {
     accountOwnerId: int(fd, "accountOwnerId"),
     accountGroupId: int(fd, "accountGroupId"),
     bdStage: bd && BD_STAGES.includes(bd) ? bd : null,
+    targetBatch: str(fd, "targetBatch"),
     notes: str(fd, "notes"),
   };
 }

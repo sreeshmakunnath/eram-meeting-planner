@@ -18,7 +18,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
     activeGroups(),
   ]);
   const qs = new URLSearchParams(Object.entries(searchParams).filter(([k, v]) => v && k !== "msg") as [string, string][]).toString();
-  const status = searchParams.status ?? "OPEN";
+  const status = searchParams.status ?? "ALL";
 
   return (
     <>
@@ -54,8 +54,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
       <form className="card mb-4 grid gap-3 p-4 md:grid-cols-4 lg:grid-cols-8">
         <input name="q" defaultValue={searchParams.q} placeholder="Search title, client, agenda" className="input md:col-span-2" />
         <select name="status" defaultValue={status} className="input">
-          <option value="OPEN">Open (not done)</option>
           <option value="ALL">All statuses</option>
+          <option value="OPEN">Open (not done)</option>
           {Object.entries(STATUS_LABEL).map(([v, l]) => (
             <option key={v} value={v}>
               {l}

@@ -7,6 +7,7 @@ import { reopenBrief, saveBrief } from "@/lib/actions/briefs";
 import { requireUser } from "@/lib/auth";
 import { canEditMeeting, canView, canWriteBrief, fmtDay, fmtPlainDate, fmtTime, MODE_LABEL } from "@/lib/meetings";
 import { activeGroups } from "@/lib/queries";
+import { TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
 import { BriefForm } from "./brief-form";
 
 export default async function BriefPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
@@ -48,6 +49,10 @@ export default async function BriefPage({ params, searchParams }: { params: { id
   );
 
   if (b?.status === "SUBMITTED") {
+    const linked = await db
+      .select({ id: schema.tasks.id, actionId: schema.tasks.sourceActionId, status: schema.tasks.status })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.sourceBriefId, b.id));
     return (
       <>
         <PageHeader
@@ -91,6 +96,7 @@ export default async function BriefPage({ params, searchParams }: { params: { id
                       <th className="pb-1">Action</th>
                       <th className="pb-1">Owner</th>
                       <th className="pb-1">Deadline</th>
+                      <th className="pb-1">Task</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -98,7 +104,19 @@ export default async function BriefPage({ params, searchParams }: { params: { id
                       <tr key={a.id} className="border-t border-slate-100">
                         <td className="py-1.5 pr-3">{a.action}</td>
                         <td className="py-1.5 pr-3">{a.owner?.fullName ?? a.ownerGroup?.name ?? "—"}</td>
-                        <td className="py-1.5">{a.deadline ? fmtPlainDate(a.deadline) : "—"}</td>
+                        <td className="py-1.5 pr-3">{a.deadline ? fmtPlainDate(a.deadline) : "—"}</td>
+                        <td className="py-1.5">
+                          {(() => {
+                            const t = linked.find((x) => x.actionId === a.id);
+                            return t ? (
+                              <Link href={`/tasks/${t.id}`}>
+                                <Badge tone={TASK_STATUS_TONE[t.status]}>{TASK_STATUS_LABEL[t.status]}</Badge>
+                              </Link>
+                            ) : (
+                              "—"
+                            );
+                          })()}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -160,6 +178,7 @@ export default async function BriefPage({ params, searchParams }: { params: { id
           documentsUsed: b?.documentsUsed ?? m.documents ?? "",
           nextFollowUpDate: b?.nextFollowUpDate?.slice(0, 10) ?? m.followUpDate?.slice(0, 10) ?? "",
           actions: (b?.actions ?? []).map((a) => ({
+            id: a.id,
             action: a.action,
             owner: a.ownerUserId ? `u:${a.ownerUserId}` : a.ownerGroupId ? `g:${a.ownerGroupId}` : "",
             deadline: a.deadline?.slice(0, 10) ?? "",

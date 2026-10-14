@@ -15,6 +15,13 @@
       "when": 1791895662173,
       "tag": "0001_meetings",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791901073288,
+      "tag": "0002_tasks",
+      "breakpoints": true
     }
   ]
 }

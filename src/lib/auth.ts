@@ -78,15 +78,21 @@ export const authOptions: NextAuthOptions = {
       // On later requests, re-read role and status so admin changes apply without re-login.
       // Runs server-side only (middleware decodes the token without calling this).
       if (token.uid) {
-        const [u] = await db
-          .select({ role: schema.users.role, status: schema.users.status, fullName: schema.users.fullName })
-          .from(schema.users)
-          .where(eq(schema.users.id, token.uid));
-        if (!u || u.status !== "ACTIVE") token.inactive = true;
-        else {
-          token.role = u.role;
-          token.name = u.fullName;
-          token.inactive = false;
+        try {
+          const [u] = await db
+            .select({ role: schema.users.role, status: schema.users.status, fullName: schema.users.fullName })
+            .from(schema.users)
+            .where(eq(schema.users.id, token.uid));
+          if (!u || u.status !== "ACTIVE") token.inactive = true;
+          else {
+            token.role = u.role;
+            token.name = u.fullName;
+            token.inactive = false;
+          }
+        } catch (e) {
+          // Database unreachable: keep the session as it was instead of failing every page.
+          // The page itself will still show a "can't reach the database" message if it needs data.
+          console.error("Session refresh skipped — database unreachable:", (e as Error).message);
         }
       }
       return token;

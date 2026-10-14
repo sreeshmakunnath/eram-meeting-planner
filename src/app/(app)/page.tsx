@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 import { clientStatusRows } from "@/lib/client-status";
 import { meetingsBetween } from "@/lib/meeting-queries";
+import { listTasks } from "@/lib/task-queries";
+import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtTime, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
 
 function Tile({ label, value, href }: { label: string; value: number | string; href?: string }) {
@@ -92,6 +94,13 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
     isAdmin ? clientStatusRows(me) : Promise.resolve([]),
   ]);
   const overdue = statusRows.filter((r) => r.flag === "OVERDUE").length;
+  const [myOpen, orgOverdue] = await Promise.all([
+    listTasks(personal, { scope: "mine", bucket: "open" }, 1000),
+    isAdmin ? listTasks(me, { scope: "all", bucket: "overdue" }, 1000) : Promise.resolve([]),
+  ]);
+  const myOverdue = myOpen.filter((t) => t.overdue);
+  const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
+  const mySoon = myOpen.filter((t) => t.overdue || (t.dueDate && t.dueDate.slice(0, 10) < in7)).slice(0, 8);
 
   return (
     <>
@@ -101,25 +110,23 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
       <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">My work</h2>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label="My meetings this week" value={myWeek.length} href={`/meetings/calendar?user=${me.id}`} />
+        <Tile label="My open tasks" value={myOpen.length} href="/tasks" />
+        <Tile label="My overdue tasks" value={myOverdue.length} href="/tasks?bucket=overdue" />
         <Tile label="Briefs to write" value={briefsPending.n} href="/meetings?status=ALL" />
-        <Tile label="My next actions" value={myActions.n} href="/meetings" />
-        <Tile label="My groups" value={myGroups.n} href="/groups" />
       </div>
       <div className="mb-8 grid gap-6 lg:grid-cols-2">
-        <section className="card p-4">
-          <h3 className="mb-2 font-semibold text-navy">My groups</h3>
-          {myGroupList.length ? (
-            <ul className="flex flex-wrap gap-2">
-              {myGroupList.map((g) => (
-                <li key={g.id}>
-                  <Link href={`/groups/${g.id}`} className="inline-block rounded-full bg-brand-50 px-3 py-1 text-sm text-navy hover:bg-brand/10">
-                    {g.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-slate-500">You&apos;re not in any group yet.</p>
+        <section className="card">
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+            <h3 className="font-semibold text-navy">My tasks — overdue & next 7 days</h3>
+            <Link href="/tasks/new" className="link text-sm">
+              + New task
+            </Link>
+          </div>
+          <TaskMiniList rows={mySoon} empty="Nothing due in the next 7 days." />
+          {myActions.n > 0 && (
+            <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+              You also own the next action on {myActions.n} open meeting{myActions.n === 1 ? "" : "s"}.
+            </p>
           )}
         </section>
         <section className="card p-4">
@@ -151,12 +158,31 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
         </section>
       </div>
 
+      <div className="mb-8">
+        <section className="card p-4">
+          <h3 className="mb-2 font-semibold text-navy">My groups</h3>
+          {myGroupList.length ? (
+            <ul className="flex flex-wrap gap-2">
+              {myGroupList.map((g) => (
+                <li key={g.id}>
+                  <Link href={`/groups/${g.id}`} className="inline-block rounded-full bg-brand-50 px-3 py-1 text-sm text-navy hover:bg-brand/10">
+                    {g.name}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-sm text-slate-500">You&apos;re not in any group yet.</p>
+          )}
+        </section>
+      </div>
+
       {isAdmin && (
         <>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Organisation</h2>
           <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Tile label="Active users" value={activeUsers.n} href="/admin/users?status=ACTIVE" />
             <Tile label="Meetings this month" value={monthCount.n} href="/meetings/calendar" />
+            <Tile label="Overdue tasks" value={orgOverdue.length} href="/tasks?scope=all&bucket=overdue" />
             <Tile label="To be scheduled" value={tbs.n} href="/meetings?status=TO_BE_SCHEDULED" />
             <Tile label="Follow-ups overdue" value={overdue} href="/reports/client-status?flag=OVERDUE" />
           </div>
@@ -184,7 +210,7 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
               </table>
             </section>
             <section className="card p-4">
-              <h3 className="mb-3 font-semibold text-navy">Active users by branch</h3>
+              <h3 className="mb-3 font-semibold text-navy">Active users by branch ({activeUsers.n})</h3>
               <table className="w-full text-sm">
                 <tbody className="divide-y divide-slate-100">
                   {branches.map((b) => (

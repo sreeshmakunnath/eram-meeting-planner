@@ -114,6 +114,7 @@ export const clients = pgTable(
     accountOwnerId: integer("account_owner_id").references(() => users.id),
     accountGroupId: integer("account_group_id").references(() => groups.id),
     bdStage: bdStageEnum("bd_stage"),
+    targetBatch: varchar("target_batch", { length: 50 }), // e.g. "Batch 1" on the BD Target Schedule
     status: clientStatusEnum("status").default("ACTIVE").notNull(),
     notes: text("notes"),
     createdById: integer("created_by_id").references(() => users.id),
@@ -212,6 +213,7 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   contacts: many(clientContacts),
   businessUnits: many(clientBusinessUnits),
   meetings: many(meetings),
+  tasks: many(tasks),
 }));
 
 export const clientBusinessUnitsRelations = relations(clientBusinessUnits, ({ one }) => ({
@@ -439,6 +441,144 @@ export const meetingActivityRelations = relations(meetingActivity, ({ one }) => 
   user: one(users, { fields: [meetingActivity.userId], references: [users.id] }),
 }));
 
+// =====================================================================
+// Phase 3 — Task planner
+// =====================================================================
+export const taskStatusEnum = pgEnum("task_status", ["NOT_STARTED", "STARTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"]);
+export const taskCategoryEnum = pgEnum("task_category", ["MARKET_RESEARCH", "MIR_REPORT", "APPROACH", "FOLLOW_UP", "PRESENTATION", "GENERAL"]);
+
+export const tasks = pgTable(
+  "tasks",
+  {
+    id: serial("id").primaryKey(),
+    title: varchar("title", { length: 200 }).notNull(),
+    description: text("description"),
+    category: taskCategoryEnum("category").default("GENERAL").notNull(),
+    meetingId: integer("meeting_id").references(() => meetings.id, { onDelete: "set null" }),
+    clientId: integer("client_id").references(() => clients.id, { onDelete: "set null" }),
+    priority: priorityEnum("priority").default("MEDIUM").notNull(),
+    startDate: timestamp("start_date", { mode: "string", withTimezone: false }),
+    dueDate: timestamp("due_date", { mode: "string", withTimezone: false }),
+    status: taskStatusEnum("status").default("NOT_STARTED").notNull(),
+    percent: integer("percent").default(0).notNull(),
+    /** Set when the task came from an agreed action on a Meeting Brief (brief + row position). */
+    sourceBriefId: integer("source_brief_id").references(() => meetingBriefs.id, { onDelete: "set null" }),
+    sourcePosition: integer("source_position"),
+    /** The brief_actions row this task came from — stays the same when the brief is edited. */
+    sourceActionId: integer("source_action_id").references(() => briefActions.id, { onDelete: "set null" }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: integer("created_by_id").references(() => users.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("tasks_due_idx").on(t.dueDate),
+    index("tasks_status_idx").on(t.status),
+    index("tasks_client_idx").on(t.clientId),
+    index("tasks_source_idx").on(t.sourceBriefId, t.sourcePosition),
+  ],
+);
+
+/** People on a task. Group members are copied in when the task is saved (viaGroupId set). */
+export const taskAssignees = pgTable(
+  "task_assignees",
+  {
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    viaGroupId: integer("via_group_id").references(() => groups.id, { onDelete: "set null" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index("task_assignees_user_idx").on(t.userId)],
+);
+
+export const taskGroups = pgTable(
+  "task_groups",
+  {
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    groupId: integer("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.groupId] })],
+);
+
+export const taskChecklist = pgTable("task_checklist", {
+  id: serial("id").primaryKey(),
+  taskId: integer("task_id")
+    .notNull()
+    .references(() => tasks.id, { onDelete: "cascade" }),
+  text: varchar("text", { length: 300 }).notNull(),
+  done: boolean("done").default(false).notNull(),
+  position: integer("position").default(0).notNull(),
+});
+
+export const taskComments = pgTable(
+  "task_comments",
+  {
+    id: serial("id").primaryKey(),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    body: text("body").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("task_comments_task_idx").on(t.taskId)],
+);
+
+export const taskActivity = pgTable(
+  "task_activity",
+  {
+    id: serial("id").primaryKey(),
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.id),
+    action: varchar("action", { length: 50 }).notNull(),
+    details: jsonb("details"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("task_activity_idx").on(t.taskId, t.createdAt)],
+);
+
+export const tasksRelations = relations(tasks, ({ one, many }) => ({
+  meeting: one(meetings, { fields: [tasks.meetingId], references: [meetings.id] }),
+  client: one(clients, { fields: [tasks.clientId], references: [clients.id] }),
+  createdBy: one(users, { fields: [tasks.createdById], references: [users.id] }),
+  assignees: many(taskAssignees),
+  groups: many(taskGroups),
+  checklist: many(taskChecklist),
+  comments: many(taskComments),
+}));
+export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({
+  task: one(tasks, { fields: [taskAssignees.taskId], references: [tasks.id] }),
+  user: one(users, { fields: [taskAssignees.userId], references: [users.id] }),
+  viaGroup: one(groups, { fields: [taskAssignees.viaGroupId], references: [groups.id] }),
+}));
+export const taskGroupsRelations = relations(taskGroups, ({ one }) => ({
+  task: one(tasks, { fields: [taskGroups.taskId], references: [tasks.id] }),
+  group: one(groups, { fields: [taskGroups.groupId], references: [groups.id] }),
+}));
+export const taskChecklistRelations = relations(taskChecklist, ({ one }) => ({
+  task: one(tasks, { fields: [taskChecklist.taskId], references: [tasks.id] }),
+}));
+export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
+  task: one(tasks, { fields: [taskComments.taskId], references: [tasks.id] }),
+  user: one(users, { fields: [taskComments.userId], references: [users.id] }),
+}));
+export const taskActivityRelations = relations(taskActivity, ({ one }) => ({
+  task: one(tasks, { fields: [taskActivity.taskId], references: [tasks.id] }),
+  user: one(users, { fields: [taskActivity.userId], references: [users.id] }),
+}));
+
+export type Task = typeof tasks.$inferSelect;
 export type Meeting = typeof meetings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Group = typeof groups.$inferSelect;
