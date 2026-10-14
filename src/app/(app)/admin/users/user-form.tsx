@@ -75,6 +75,19 @@ export async function UserForm({
               ))}
           </select>
         </Field>
+        <Field
+          label={user ? "New password" : "Password"}
+          hint={
+            user
+              ? "Leave blank to keep the current password."
+              : "Optional. Leave blank to email the user a link to set their own. 8+ characters with an upper-case letter, a number and a symbol."
+          }
+        >
+          <input name="password" type="password" className="input" autoComplete="new-password" maxLength={100} />
+        </Field>
+        <Field label={user ? "Confirm new password" : "Confirm password"}>
+          <input name="confirmPassword" type="password" className="input" autoComplete="new-password" maxLength={100} />
+        </Field>
         <div className="md:col-span-2">
           <span className="label">Groups</span>
           <CheckboxList
@@ -89,7 +102,7 @@ export async function UserForm({
         <Link href="/admin/users" className="btn-secondary">
           Cancel
         </Link>
-        <SubmitButton>{user ? "Save changes" : "Create user and send welcome email"}</SubmitButton>
+        <SubmitButton>{user ? "Save changes" : "Create user"}</SubmitButton>
       </div>
     </ActionForm>
   );

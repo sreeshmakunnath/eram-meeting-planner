@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { notFound, redirect } from "next/navigation";
+import { Logo } from "@/components/logo";
 import { PrintButton } from "@/components/print-button";
 import { fmtDateTime } from "@/components/ui";
 import { db, schema } from "@/db";
@@ -62,6 +63,9 @@ export default async function PrintBrief({ params }: { params: { id: string } })
           ← Back
         </a>
         <PrintButton />
+      </div>
+      <div className="mb-3 flex justify-start">
+        <Logo on="light" className="h-12" />
       </div>
       <div className="bg-navy px-4 py-3 text-center text-lg font-bold tracking-wide text-white">ERAM HOLDINGS | MEETING BRIEF</div>
       <table className="w-full border-collapse">

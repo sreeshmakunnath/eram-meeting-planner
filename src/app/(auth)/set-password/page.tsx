@@ -11,8 +11,8 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
   if (!valid) {
     return (
       <div className="space-y-4">
-        <h1 className="text-xl font-bold text-navy">Link expired</h1>
-        <p className="text-sm text-slate-600">This link is invalid, already used, or expired. Request a new one.</p>
+        <h1 className="text-xl font-bold text-white">Link expired</h1>
+        <p className="text-sm text-white/75">This link is invalid, already used, or expired. Request a new one.</p>
         <Link href="/forgot-password" className="btn-primary w-full">
           Request a new link
         </Link>
@@ -21,8 +21,8 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
   }
   return (
     <div className="space-y-4">
-      <h1 className="text-xl font-bold text-navy">{valid.type === "SET_PASSWORD" ? "Set your password" : "Reset your password"}</h1>
-      <p className="text-sm text-slate-600">At least 8 characters, with an upper-case letter, a number and a symbol.</p>
+      <h1 className="text-xl font-bold text-white">{valid.type === "SET_PASSWORD" ? "Set your password" : "Reset your password"}</h1>
+      <p className="text-sm text-white/75">At least 8 characters, with an upper-case letter, a number and a symbol.</p>
       <ActionForm action={setPassword} className="space-y-4">
         <input type="hidden" name="token" value={token} />
         <label className="block">

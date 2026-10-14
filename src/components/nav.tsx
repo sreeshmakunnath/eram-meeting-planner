@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut } from "next-auth/react";
 import { useEffect, useState } from "react";
+import { Logo } from "./logo";
 
 type Item = { href: string; label: string; soon?: string };
 
@@ -49,8 +50,8 @@ export function Sidebar({ name, role }: { name: string; role: "ADMIN" | "USER" }
   return (
     <aside className="flex w-full flex-col bg-navy text-white md:min-h-screen md:w-60 md:shrink-0">
       <div className="flex items-center justify-between px-5 py-4 md:py-5">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.2em] text-white/60">ERAM Holdings</div>
+        <div className="flex flex-col items-start gap-2">
+          <Logo on="dark" className="h-11" />
           <div className="text-lg font-bold">Meeting Planner</div>
         </div>
         <button onClick={() => setOpen(!open)} className="rounded-md border border-white/20 px-3 py-1.5 text-sm md:hidden" aria-expanded={open}>

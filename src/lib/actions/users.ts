@@ -7,7 +7,8 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
-import { esc, sendMail } from "@/lib/mail";
+import { appUrl, button, esc, sendMail } from "@/lib/mail";
+import { hashPassword, passwordProblem } from "@/lib/password";
 import { sendResetEmail, sendWelcomeEmail } from "./auth";
 
 function readUser(fd: FormData) {
@@ -35,6 +36,27 @@ function readUser(fd: FormData) {
   };
 }
 
+/** Optional password typed by the Admin. Returns null when left blank. */
+function readPassword(fd: FormData) {
+  const password = (fd.get("password") as string | null) ?? "";
+  const confirm = (fd.get("confirmPassword") as string | null) ?? "";
+  if (!password && !confirm) return null;
+  if (password !== confirm) throw new FormError("The two passwords don't match.");
+  const problem = passwordProblem(password);
+  if (problem) throw new FormError(problem);
+  return password;
+}
+
+/** Welcome email for a user whose password the Admin set: no link, and never the password itself. */
+async function sendAccountReadyEmail(user: { email: string; fullName: string; username: string }) {
+  await sendMail(
+    user.email,
+    "Welcome to ERAM Meeting Planner",
+    "Your account is ready",
+    `<p>Hello ${esc(user.fullName)},</p><p>An account has been created for you on ERAM Meeting Planner. Your username is <b>${esc(user.username)}</b>.</p><p>Your administrator will give you your password. Please change it under <b>My profile</b> after you sign in.</p>${button(appUrl("/login"), "Sign in")}`,
+  );
+}
+
 /** Adds the user to newly selected groups and emails them about each new group. */
 async function syncMemberships(userId: number, email: string, fullName: string, groupIds: number[]) {
   const current = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, userId));
@@ -58,19 +80,26 @@ async function syncMemberships(userId: number, email: string, fullName: string, 
 
 export async function createUser(_: ActionState, fd: FormData): Promise<ActionState> {
   let id: number;
+  let passwordSet = false;
   try {
     const admin = await requireAdmin();
     const data = readUser(fd);
-    const [user] = await db.insert(schema.users).values({ ...data, createdById: admin.id, updatedById: admin.id }).returning();
+    const password = readPassword(fd);
+    passwordSet = !!password;
+    const [user] = await db
+      .insert(schema.users)
+      .values({ ...data, passwordHash: password ? await hashPassword(password) : null, createdById: admin.id, updatedById: admin.id })
+      .returning();
     id = user.id;
     await syncMemberships(user.id, user.email, user.fullName, ints(fd, "groupIds"));
-    await sendWelcomeEmail(user);
-    await audit(admin.id, "USER_CREATED", "user", user.id, { username: user.username, role: user.role });
+    if (password) await sendAccountReadyEmail(user);
+    else await sendWelcomeEmail(user);
+    await audit(admin.id, "USER_CREATED", "user", user.id, { username: user.username, role: user.role, passwordSetByAdmin: !!password });
   } catch (e) {
     return toFormError(e);
   }
   revalidatePath("/admin/users");
-  redirect(`/admin/users/${id}?msg=created`);
+  redirect(`/admin/users/${id}?msg=${passwordSet ? "created_pw" : "created"}`);
 }
 
 export async function updateUser(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -79,16 +108,22 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     const id = int(fd, "id");
     if (!id) throw new FormError("Missing user.");
     const data = readUser(fd);
+    const password = readPassword(fd);
     const [before] = await db.select().from(schema.users).where(eq(schema.users.id, id));
     if (!before) throw new FormError("User not found.");
     if (id === admin.id && data.role !== "ADMIN") throw new FormError("You can't remove your own Admin role.");
     if (data.managerId === id) throw new FormError("A user can't be their own reporting manager.");
     await db.update(schema.users).set({ ...data, updatedById: admin.id }).where(eq(schema.users.id, id));
+    if (password) {
+      // A new password also clears any lockout so the user can sign in with it right away.
+      await db.update(schema.users).set({ passwordHash: await hashPassword(password), failedLogins: 0, lockedUntil: null }).where(eq(schema.users.id, id));
+      await audit(admin.id, "PASSWORD_SET_BY_ADMIN", "user", id);
+    }
     const groups = await syncMemberships(id, data.email, data.fullName, ints(fd, "groupIds"));
     const changed = Object.keys(data).filter((k) => String(before[k as keyof typeof before] ?? "") !== String(data[k as keyof typeof data] ?? ""));
     await audit(admin.id, "USER_UPDATED", "user", id, { changed, groupsAdded: groups.added, groupsRemoved: groups.removed });
     revalidatePath("/admin/users");
-    return { ok: "User saved." };
+    return { ok: password ? "User saved and password changed." : "User saved." };
   } catch (e) {
     return toFormError(e);
   }

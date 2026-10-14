@@ -7,7 +7,7 @@ export default async function NewUserPage() {
   await requireAdmin();
   return (
     <>
-      <PageHeader title="Add user" subtitle="The user receives a welcome email with a link to set their password." />
+      <PageHeader title="Add user" subtitle="Set a password now, or leave it blank and the user gets a welcome email with a link to set their own." />
       <UserForm action={createUser} />
     </>
   );

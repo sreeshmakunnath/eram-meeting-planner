@@ -17,6 +17,12 @@
   .table th { @apply bg-slate-50 px-4 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500; }
   .table td { @apply px-4 py-2.5 align-top; }
   .link { @apply font-medium text-brand hover:underline; }
+
+  /* Glass card on the sign-in pages: light text and see-through fields. */
+  .glass .label { @apply text-white/85; }
+  .glass .input { @apply border-white/30 bg-white/10 text-white placeholder-white/50 shadow-none focus:border-white/70 focus:bg-white/15 focus:ring-white/30; }
+  .glass .link { @apply text-white underline-offset-2 hover:text-white; }
+  .glass .btn-primary { @apply bg-white text-navy shadow-lg hover:bg-white/90; }
 }
 
 @media print {

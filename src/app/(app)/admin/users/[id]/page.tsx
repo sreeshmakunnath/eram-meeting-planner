@@ -8,6 +8,7 @@ import { UserForm } from "../user-form";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   created: { tone: "ok", text: "User created. A welcome email with a set-password link has been sent." },
+  created_pw: { tone: "ok", text: "User created with the password you set. They can sign in now; a welcome email with their username has been sent." },
   activated: { tone: "ok", text: "User activated." },
   deactivated: { tone: "ok", text: "User deactivated. They can no longer sign in; their history is kept." },
   unlocked: { tone: "ok", text: "Account unlocked." },

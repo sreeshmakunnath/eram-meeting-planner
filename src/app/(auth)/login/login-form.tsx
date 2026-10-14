@@ -29,7 +29,7 @@ export default function LoginForm() {
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <h1 className="text-xl font-bold text-navy">Sign in</h1>
+      <h1 className="text-xl font-bold text-white">Sign in</h1>
       {notice && <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</div>}
       {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</div>}
       <label className="block">

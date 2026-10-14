@@ -14,5 +14,6 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/((?!login|forgot-password|set-password|api/auth|_next/static|_next/image|favicon.ico).*)"],
+  // Public images (the logo) must load on the sign-in pages too.
+  matcher: ["/((?!login|forgot-password|set-password|api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)"],
 };
