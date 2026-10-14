@@ -92,7 +92,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
             </option>
           ))}
         </select>
-        <button className="btn-secondary">Filter</button>
+        <button className="btn-primary">Filter</button>
         <label className="flex items-center gap-2 text-sm text-slate-600 md:col-span-2">
           From <input type="date" name="from" defaultValue={searchParams.from} className="input" />
         </label>
