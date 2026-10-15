@@ -58,7 +58,9 @@ export const users = pgTable(
     branchId: integer("branch_id")
       .notNull()
       .references(() => branches.id),
-    businessUnitId: integer("business_unit_id").references(() => businessUnits.id),
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id),
     designation: varchar("designation", { length: 100 }),
     mobile: varchar("mobile", { length: 20 }),
     managerId: integer("manager_id").references((): AnyPgColumn => users.id),

@@ -1,25 +1,26 @@
-import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, fmtDateTime, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
-import { activeBranches } from "@/lib/queries";
+import { activeBusinessUnits } from "@/lib/queries";
 
-type Search = { q?: string; branch?: string; role?: string; status?: string };
+type Search = { q?: string; bu?: string; role?: string; status?: string };
 
 export default async function UsersPage({ searchParams }: { searchParams: Search }) {
   await requireAdmin();
-  const { users, branches } = schema;
+  const { users, businessUnits } = schema;
   const where: SQL[] = [];
   if (searchParams.q) {
     const q = `%${searchParams.q}%`;
     where.push(or(ilike(users.fullName, q), ilike(users.email, q), ilike(users.username, q), ilike(users.employeeId, q))!);
   }
-  if (searchParams.branch) where.push(eq(users.branchId, Number(searchParams.branch)));
+  if (searchParams.bu === "none") where.push(isNull(users.businessUnitId));
+  else if (searchParams.bu) where.push(eq(users.businessUnitId, Number(searchParams.bu)));
   if (searchParams.role === "ADMIN" || searchParams.role === "USER") where.push(eq(users.role, searchParams.role));
   if (searchParams.status === "ACTIVE" || searchParams.status === "INACTIVE") where.push(eq(users.status, searchParams.status));
 
-  const [rows, branchList] = await Promise.all([
+  const [rows, buList] = await Promise.all([
     db
       .select({
         id: users.id,
@@ -31,14 +32,14 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
         designation: users.designation,
         lastLoginAt: users.lastLoginAt,
         lockedUntil: users.lockedUntil,
-        branch: branches.name,
+        businessUnit: businessUnits.name,
         groupCount: sql<number>`(select count(*) from group_members gm where gm.user_id = ${users.id})`.mapWith(Number),
       })
       .from(users)
-      .innerJoin(branches, eq(users.branchId, branches.id))
+      .leftJoin(businessUnits, eq(users.businessUnitId, businessUnits.id))
       .where(where.length ? and(...where) : undefined)
       .orderBy(asc(users.fullName)),
-    activeBranches(),
+    activeBusinessUnits(),
   ]);
 
   return (
@@ -54,13 +55,14 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
       />
       <form className="card mb-4 grid gap-3 p-4 md:grid-cols-5">
         <input name="q" defaultValue={searchParams.q} placeholder="Search name, email, username, employee ID" className="input md:col-span-2" />
-        <select name="branch" defaultValue={searchParams.branch ?? ""} className="input">
-          <option value="">All branches</option>
-          {branchList.map((b) => (
+        <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
+          <option value="">All business units</option>
+          {buList.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
             </option>
           ))}
+          <option value="none">No business unit</option>
         </select>
         <select name="role" defaultValue={searchParams.role ?? ""} className="input">
           <option value="">All roles</option>
@@ -85,7 +87,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
               <tr>
                 <th>Name</th>
                 <th>Email / username</th>
-                <th>Branch</th>
+                <th>Business unit</th>
                 <th>Role</th>
                 <th>Groups</th>
                 <th>Status</th>
@@ -105,7 +107,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
                     {u.email}
                     <div className="text-xs text-slate-500">{u.username}</div>
                   </td>
-                  <td>{u.branch}</td>
+                  <td>{u.businessUnit ?? <span className="text-slate-400">—</span>}</td>
                   <td>{u.role === "ADMIN" ? <Badge tone="navy">Admin</Badge> : "User"}</td>
                   <td>{u.groupCount}</td>
                   <td>

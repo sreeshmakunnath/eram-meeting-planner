@@ -22,6 +22,13 @@
       "when": 1791901073288,
       "tag": "0002_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1792047945455,
+      "tag": "0003_users_bu_required",
+      "breakpoints": true
     }
   ]
 }

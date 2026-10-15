@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import Link from "next/link";
 import { ActionForm, SubmitButton, type ActionState } from "@/components/action-form";
 import { CheckboxList } from "@/components/checkbox-list";
 import { Field } from "@/components/ui";
+import { db, schema } from "@/db";
 import type { User } from "@/db/schema";
 import { activeBranches, activeBusinessUnits, activeGroups, activeUsers } from "@/lib/queries";
 
@@ -15,6 +17,11 @@ export async function UserForm({
   groupIds?: number[];
 }) {
   const [branches, bus, users, groups] = await Promise.all([activeBranches(), activeBusinessUnits(), activeUsers(), activeGroups()]);
+  // Keep the user's current unit selectable even if it has since been deactivated, so the form can still be saved.
+  const current = user?.businessUnitId && !bus.some((b) => b.id === user.businessUnitId)
+    ? await db.select().from(schema.businessUnits).where(eq(schema.businessUnits.id, user.businessUnitId))
+    : [];
+  const buOptions = [...bus, ...current.map((b) => ({ ...b, name: `${b.name} (inactive)` }))];
   return (
     <ActionForm action={action} className="card p-6">
       {user && <input type="hidden" name="id" value={user.id} />}
@@ -47,10 +54,10 @@ export async function UserForm({
             ))}
           </select>
         </Field>
-        <Field label="Business unit / Department">
-          <select name="businessUnitId" className="input" defaultValue={user?.businessUnitId ?? ""}>
-            <option value="">—</option>
-            {bus.map((b) => (
+        <Field label="Business unit / Department *">
+          <select name="businessUnitId" className="input" defaultValue={user?.businessUnitId ?? ""} required>
+            <option value="">Select business unit</option>
+            {buOptions.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
               </option>

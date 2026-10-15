@@ -20,6 +20,8 @@ function readUser(fd: FormData) {
   const role = str(fd, "role") === "ADMIN" ? ("ADMIN" as const) : ("USER" as const);
   const branchId = int(fd, "branchId");
   if (!branchId) throw new FormError("Branch is required.");
+  const businessUnitId = int(fd, "businessUnitId");
+  if (!businessUnitId) throw new FormError("Business unit is required.");
   const mobile = str(fd, "mobile");
   if (mobile && !/^\+?[0-9 ]{7,20}$/.test(mobile)) throw new FormError("Mobile number should be digits, e.g. +966 5X XXX XXXX.");
   return {
@@ -29,7 +31,7 @@ function readUser(fd: FormData) {
     employeeId: str(fd, "employeeId"),
     role,
     branchId,
-    businessUnitId: int(fd, "businessUnitId"),
+    businessUnitId,
     designation: str(fd, "designation"),
     mobile,
     managerId: int(fd, "managerId"),

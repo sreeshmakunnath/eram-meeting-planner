@@ -26,12 +26,12 @@ export default async function GroupPage({ params, searchParams }: { params: { id
       fullName: schema.users.fullName,
       email: schema.users.email,
       designation: schema.users.designation,
-      branch: schema.branches.name,
+      businessUnit: schema.businessUnits.name,
       addedAt: schema.groupMembers.addedAt,
     })
     .from(schema.groupMembers)
     .innerJoin(schema.users, eq(schema.groupMembers.userId, schema.users.id))
-    .innerJoin(schema.branches, eq(schema.users.branchId, schema.branches.id))
+    .leftJoin(schema.businessUnits, eq(schema.users.businessUnitId, schema.businessUnits.id))
     .where(eq(schema.groupMembers.groupId, id))
     .orderBy(asc(schema.users.fullName));
   if (me.role !== "ADMIN" && !members.some((m) => m.id === me.id)) redirect("/groups");
@@ -66,7 +66,7 @@ export default async function GroupPage({ params, searchParams }: { params: { id
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Branch</th>
+                <th>Business unit</th>
                 <th>Added</th>
               </tr>
             </thead>
@@ -77,7 +77,7 @@ export default async function GroupPage({ params, searchParams }: { params: { id
                     {m.fullName} {m.id === group.leadUserId && <Badge tone="blue">Lead</Badge>}
                     <div className="text-xs text-slate-500">{m.designation ?? m.email}</div>
                   </td>
-                  <td>{m.branch}</td>
+                  <td>{m.businessUnit ?? <span className="text-slate-400">—</span>}</td>
                   <td className="text-slate-500">{fmtDate(m.addedAt)}</td>
                 </tr>
               ))}
