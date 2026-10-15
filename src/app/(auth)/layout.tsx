@@ -2,12 +2,10 @@ import { Logo } from "@/components/logo";
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-navy via-navy-600 to-brand p-4">
-      {/* Soft colour glows behind the glass card; the blur needs something to show through. */}
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-navy bg-[url('/bg-login.svg')] bg-cover bg-center p-4">
+      {/* One soft glow right behind the glass card so its blur has colour to pick up. */}
       <div aria-hidden className="pointer-events-none absolute inset-0">
-        <div className="absolute -left-24 -top-24 h-96 w-96 rounded-full bg-brand/60 blur-3xl" />
-        <div className="absolute -bottom-32 -right-16 h-[28rem] w-[28rem] rounded-full bg-sky-400/40 blur-3xl" />
-        <div className="absolute left-1/2 top-1/3 h-72 w-72 -translate-x-1/2 rounded-full bg-indigo-400/25 blur-3xl" />
+        <div className="absolute left-1/2 top-1/2 h-[30rem] w-[30rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand/30 blur-3xl" />
       </div>
 
       <div className="relative w-full max-w-md">

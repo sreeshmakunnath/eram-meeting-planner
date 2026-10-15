@@ -1,0 +1,74 @@
+import { and, asc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { riyadh, todayRiyadh } from "./meetings";
+
+const count = sql<number>`count(*)`.mapWith(Number);
+const m = schema.meetings;
+
+/** "YYYY-MM" of the month `offset` months from the given "YYYY-MM-DD". */
+function monthKey(today: string, offset: number) {
+  const d = new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)) - 1 + offset, 1));
+  return d.toISOString().slice(0, 7);
+}
+const monthStart = (key: string) => riyadh(`${key}-01`, "00:00");
+
+export type MonthPoint = { key: string; label: string; held: number };
+export type BuRow = { id: number | null; name: string; users: number; held: number; clients: number };
+
+/** Admin overview: meetings held per month, the BU breakdown, and the headline counts. */
+export async function orgStats() {
+  const today = todayRiyadh();
+  const thisMonth = monthKey(today, 0);
+  const firstMonth = monthKey(today, -11);
+  const since = monthStart(firstMonth);
+  const until = monthStart(monthKey(today, 1));
+  const held = and(eq(m.status, "COMPLETED"), gte(m.startAt, since), lt(m.startAt, until));
+  const month = sql<string>`to_char(${m.startAt} at time zone 'Asia/Riyadh', 'YYYY-MM')`;
+
+  const [perMonth, bus, usersByBu, heldByBu, clientsByBu, clientStatus, [upcoming]] = await Promise.all([
+    db.select({ key: month, n: count }).from(m).where(held).groupBy(month),
+    db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)).orderBy(asc(schema.businessUnits.name)),
+    db.select({ id: schema.users.businessUnitId, n: count }).from(schema.users).where(eq(schema.users.status, "ACTIVE")).groupBy(schema.users.businessUnitId),
+    db
+      .select({ id: schema.meetingBusinessUnits.businessUnitId, n: count })
+      .from(schema.meetingBusinessUnits)
+      .innerJoin(m, eq(schema.meetingBusinessUnits.meetingId, m.id))
+      .where(held)
+      .groupBy(schema.meetingBusinessUnits.businessUnitId),
+    db
+      .select({ id: schema.clientBusinessUnits.businessUnitId, n: count })
+      .from(schema.clientBusinessUnits)
+      .innerJoin(schema.clients, eq(schema.clientBusinessUnits.clientId, schema.clients.id))
+      .where(ne(schema.clients.status, "INACTIVE"))
+      .groupBy(schema.clientBusinessUnits.businessUnitId),
+    db.select({ status: schema.clients.status, n: count }).from(schema.clients).groupBy(schema.clients.status),
+    db
+      .select({ n: count })
+      .from(m)
+      .where(and(inArray(m.status, ["SCHEDULED", "CONFIRMED"]), gte(m.startAt, new Date()), lt(m.startAt, new Date(Date.now() + 7 * 86400_000)))),
+  ]);
+
+  const months: MonthPoint[] = Array.from({ length: 12 }, (_, i) => {
+    const key = monthKey(today, i - 11);
+    const label = new Date(`${key}-01T00:00:00Z`).toLocaleString("en-GB", { month: "short", timeZone: "UTC" });
+    return { key, label, held: perMonth.find((p) => p.key === key)?.n ?? 0 };
+  });
+
+  const pick = (rows: { id: number | null; n: number }[], id: number | null) => rows.find((r) => r.id === id)?.n ?? 0;
+  const buRows: BuRow[] = bus.map((b) => ({ id: b.id, name: b.name, users: pick(usersByBu, b.id), held: pick(heldByBu, b.id), clients: pick(clientsByBu, b.id) }));
+  const unassignedUsers = pick(usersByBu, null);
+  if (unassignedUsers) buRows.push({ id: null, name: "No business unit", users: unassignedUsers, held: 0, clients: 0 });
+
+  const clientCount = (s: string) => clientStatus.find((c) => c.status === s)?.n ?? 0;
+  return {
+    months,
+    heldThisMonth: months[11].held,
+    heldLastMonth: months[10].held,
+    heldYear: months.reduce((s, p) => s + p.held, 0),
+    thisMonth,
+    buRows,
+    activeUsers: usersByBu.reduce((s, r) => s + r.n, 0),
+    clients: { active: clientCount("ACTIVE"), pending: clientCount("PENDING_REVIEW"), inactive: clientCount("INACTIVE") },
+    upcoming7: upcoming.n,
+  };
+}
