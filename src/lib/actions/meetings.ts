@@ -6,6 +6,7 @@ import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
+import { assertClientName } from "@/lib/client-names";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import {
@@ -168,7 +169,7 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     let clientId: number | null = null;
     const clientField = str(fd, "clientId");
     if (clientField === "new") {
-      const name = req(fd, "newClientName", "New client name");
+      const name = await assertClientName(req(fd, "newClientName", "New client name"), { confirmed: fd.get("confirmDifferent") === "on" });
       const country = req(fd, "newClientCountry", "New client country");
       const [c] = await db
         .insert(schema.clients)

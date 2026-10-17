@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ActionForm, SubmitButton, type ActionState } from "@/components/action-form";
+import { ClientNameField } from "@/components/client-name-field";
 import type { MeetingFormOptions } from "./form-options";
 
 const STATUSES: [string, string][] = [
@@ -163,7 +164,7 @@ export function MeetingForm({
           {clientId === "new" && (
             <div className="grid gap-4 rounded-md border border-brand/20 bg-brand-50/50 p-3 md:col-span-3 md:grid-cols-2">
               <L label="New client name *">
-                <input name="newClientName" className="input" maxLength={150} />
+                <ClientNameField name="newClientName" />
               </L>
               <L label="Country *">
                 <input name="newClientCountry" className="input" defaultValue="Saudi Arabia" maxLength={100} />

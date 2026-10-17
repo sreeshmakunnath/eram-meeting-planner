@@ -28,6 +28,11 @@ export function ImportForm({ action }: { action: (s: ImportResult | undefined, f
             {state.skipped ? `, skipped ${state.skipped} already in the planner` : ""}.
           </p>
           {!!state.clientsCreated?.length && <p>New clients added to the client master: {state.clientsCreated.join(", ")}.</p>}
+          {!!state.clientsLinked?.length && (
+            <p className="text-amber-800">
+              Names linked to an existing client because they look alike: {state.clientsLinked.join("; ")}. If any link is wrong, edit that meeting and pick the right client.
+            </p>
+          )}
           {!!state.unmatchedPeople?.length && (
             <p className="text-amber-800">
               Names not matched to users (kept in each meeting&apos;s notes): {state.unmatchedPeople.join(", ")}. Add them as users, then edit the meetings to pick them as attendees.

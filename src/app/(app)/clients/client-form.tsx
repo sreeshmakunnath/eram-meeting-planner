@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { CheckboxList } from "@/components/checkbox-list";
+import { ClientNameField } from "@/components/client-name-field";
 import { Field, labelize } from "@/components/ui";
 import type { Client } from "@/db/schema";
 import { saveClient } from "@/lib/actions/clients";
@@ -14,7 +15,7 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
       {client && <input type="hidden" name="id" value={client.id} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Client name *">
-          <input name="name" className="input" defaultValue={client?.name} maxLength={150} required />
+          <ClientNameField name="name" defaultValue={client?.name ?? ""} excludeId={client?.id} />
         </Field>
         <Field label="Short code" hint="e.g. L&T, NMDC">
           <input name="shortCode" className="input" defaultValue={client?.shortCode ?? ""} maxLength={10} />

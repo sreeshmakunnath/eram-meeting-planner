@@ -6,7 +6,7 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { logActivity, riyadh } from "@/lib/meetings";
-import { isSimilar } from "@/lib/similar";
+import { cleanClientName, looksLike } from "@/lib/client-names";
 import { asDate, asTime, norm, splitNames, text } from "@/lib/xl-read";
 
 export type ImportResult = {
@@ -14,6 +14,7 @@ export type ImportResult = {
   created?: number;
   skipped?: number;
   clientsCreated?: string[];
+  clientsLinked?: string[]; // "Sabbic → SABIC": near-spellings linked to an existing client
   unmatchedPeople?: string[];
   rowsWithIssues?: string[];
 };
@@ -75,7 +76,7 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
 
   const [users, clients, bus] = await Promise.all([
     db.select({ id: schema.users.id, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
-    db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients),
+    db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode }).from(schema.clients),
     db.select().from(schema.businessUnits),
   ]);
   const unmatched = new Set<string>();
@@ -89,22 +90,27 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
     return null;
   };
 
-  const result: Required<Omit<ImportResult, "error">> = { created: 0, skipped: 0, clientsCreated: [], unmatchedPeople: [], rowsWithIssues: [] };
+  const result: Required<Omit<ImportResult, "error">> = { created: 0, skipped: 0, clientsCreated: [], clientsLinked: [], unmatchedPeople: [], rowsWithIssues: [] };
   const get = (row: ExcelJS.Row, f: string) => (col[f] ? row.getCell(col[f]).value : null);
 
   for (let r = headerRow + 1; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
-    const clientName = text(get(row, "client"));
+    const clientName = cleanClientName(text(get(row, "client")));
     if (!clientName) continue;
 
-    let client = clients.find((c) => c.name.toLowerCase() === clientName.toLowerCase()) ?? clients.find((c) => isSimilar(c.name, clientName));
+    let client = clients.find((c) => c.name.toLowerCase() === clientName.toLowerCase());
+    if (!client) {
+      client = clients.find((c) => looksLike(c, clientName));
+      const link = client && `${clientName} → ${client.name}`;
+      if (link && !result.clientsLinked.includes(link)) result.clientsLinked.push(link);
+    }
     if (!client) {
       const loc = text(get(row, "location"));
       const parts = loc.split(",").map((x) => x.trim()).filter(Boolean);
       const [c] = await db
         .insert(schema.clients)
         .values({ name: clientName, country: parts.at(-1) || "Saudi Arabia", city: parts.length > 1 ? parts[0] : null, type: "PROSPECT", createdById: admin.id })
-        .returning({ id: schema.clients.id, name: schema.clients.name });
+        .returning({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode });
       clients.push(c);
       client = c;
       result.clientsCreated.push(clientName);

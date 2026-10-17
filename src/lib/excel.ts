@@ -66,3 +66,68 @@ export const xlsxResponse = (buf: Buffer, filename: string) =>
 
 /** A plain date string (yyyy-mm-dd) as an Excel date. */
 export const xlDate = (s: string | null | undefined) => (s ? new Date(`${s.slice(0, 10)}T00:00:00Z`) : null);
+
+export type TemplateColumn = {
+  header: string;
+  width: number;
+  help?: string; // shown as a note on the header cell
+  list?: { title: string; values: string[]; strict: boolean }; // dropdown; strict = only list values allowed
+  numFmt?: string; // e.g. dates and times
+  required?: boolean; // darker header
+};
+
+/**
+ * An empty import sheet: styled header on row 1 with hints, dropdowns fed from a "Lists" sheet,
+ * and a "How to fill" sheet. Used for the client and meeting import templates.
+ */
+export async function buildImportTemplate(opts: { sheet: string; columns: TemplateColumn[]; howTo: string[]; rows?: number }) {
+  const rows = opts.rows ?? 1000;
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "ERAM Meeting Planner";
+  const ws = wb.addWorksheet(opts.sheet, { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = opts.columns.map((c) => ({ header: c.header, width: c.width }));
+  const head = ws.getRow(1);
+  head.height = 30;
+  opts.columns.forEach((c, i) => {
+    const cell = head.getCell(i + 1);
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, name: "Calibri" };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: c.required ? NAVY : BLUE } };
+    cell.alignment = { vertical: "middle", wrapText: true };
+    if (c.help) cell.note = c.help;
+    if (c.numFmt) for (let r = 2; r <= rows + 1; r++) ws.getCell(r, i + 1).numFmt = c.numFmt;
+  });
+
+  const lists = wb.addWorksheet("Lists");
+  let listCol = 0;
+  opts.columns.forEach((c, i) => {
+    if (!c.list) return;
+    listCol++;
+    const letter = String.fromCharCode(64 + listCol);
+    lists.getColumn(listCol).width = 30;
+    const h = lists.getCell(1, listCol);
+    h.value = c.list.title;
+    h.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    h.fill = { type: "pattern", pattern: "solid", fgColor: { argb: BLUE } };
+    c.list.values.forEach((v, r) => (lists.getCell(r + 2, listCol).value = v));
+    const range = `Lists!$${letter}$2:$${letter}$${Math.max(2, c.list.values.length + 1)}`;
+    for (let r = 2; r <= rows + 1; r++)
+      ws.getCell(r, i + 1).dataValidation = {
+        type: "list",
+        allowBlank: true,
+        formulae: [range],
+        showErrorMessage: c.list.strict,
+        errorTitle: "Pick from the list",
+        error: "Choose one of the values in the list.",
+      };
+  });
+
+  const help = wb.addWorksheet("How to fill");
+  help.getColumn(1).width = 110;
+  opts.howTo.forEach((line, i) => {
+    const cell = help.getCell(i + 1, 1);
+    cell.value = line;
+    cell.alignment = { wrapText: true, vertical: "top" };
+    if (i === 0) cell.font = { bold: true, size: 14, color: { argb: NAVY } };
+  });
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}

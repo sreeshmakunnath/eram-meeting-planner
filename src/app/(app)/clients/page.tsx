@@ -58,6 +58,11 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
             <a href={`/api/clients/export?${csv}`} className="btn-secondary">
               Export CSV
             </a>
+            {me.role === "ADMIN" && (
+              <Link href="/clients/import" className="btn-secondary">
+                Import Excel
+              </Link>
+            )}
             <Link href="/clients/new" className="btn-primary">
               Add client
             </Link>

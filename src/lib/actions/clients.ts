@@ -1,5 +1,5 @@
 "use server";
-import { and, eq, ne, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
+import { assertClientName, clientNameMatches, type ClientNameMatches } from "@/lib/client-names";
 import { BD_STAGES, CLIENT_STATUSES, CLIENT_TYPES } from "@/lib/queries";
 
 const canEdit = (me: SessionUser, c: { accountOwnerId: number | null }) => me.role === "ADMIN" || c.accountOwnerId === me.id;
@@ -44,11 +45,8 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
     const me = await requireUser();
     id = int(fd, "id");
     const data = readClient(fd);
-    const [dup] = await db
-      .select({ id: schema.clients.id, name: schema.clients.name })
-      .from(schema.clients)
-      .where(and(sql`lower(${schema.clients.name}) = lower(${data.name})`, id ? ne(schema.clients.id, id) : undefined));
-    if (dup) throw new FormError(`"${dup.name}" already exists in the client master.`);
+    const [previous] = id ? await db.select({ name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, id)) : [];
+    data.name = await assertClientName(data.name, { excludeId: id, confirmed: fd.get("confirmDifferent") === "on", previousName: previous?.name });
 
     const requested = str(fd, "status") as (typeof CLIENT_STATUSES)[number] | null;
     if (id) {
@@ -142,4 +140,10 @@ export async function updateBdStage(clientId: number, fd: FormData) {
   await db.update(schema.clients).set({ bdStage }).where(eq(schema.clients.id, clientId));
   await audit(me.id, "CLIENT_STAGE_CHANGED", "client", clientId, { from: client.bdStage, to: bdStage });
   revalidatePath("/reports/client-status");
+}
+
+/** Live name check for the client forms: same name (any case) and similar names. */
+export async function checkClientName(name: string, excludeId?: number | null): Promise<ClientNameMatches> {
+  await requireUser();
+  return clientNameMatches(name, excludeId);
 }

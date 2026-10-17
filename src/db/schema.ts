@@ -1,6 +1,6 @@
 // ERAM Meeting Planner — Phase 1 schema (Drizzle ORM, PostgreSQL)
 // Users, roles, branches, business units, groups, client master, auth tokens, audit log.
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
@@ -13,6 +13,7 @@ import {
   serial,
   text,
   timestamp,
+  uniqueIndex,
   varchar,
 } from "drizzle-orm/pg-core";
 
@@ -123,7 +124,8 @@ export const clients = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("clients_status_idx").on(t.status)],
+  // One client per name, ignoring case: "SABIC" and "sabic" can't both exist.
+  (t) => [index("clients_status_idx").on(t.status), uniqueIndex("clients_name_lower_idx").on(sql`lower(${t.name})`)],
 );
 
 export const clientBusinessUnits = pgTable(
