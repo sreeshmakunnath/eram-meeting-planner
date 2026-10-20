@@ -587,3 +587,22 @@ export type Meeting = typeof meetings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Client = typeof clients.$inferSelect;
+
+/** In-app notifications: saved for every event that also emails a user, so nothing depends on SMTP. */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 40 }).notNull(), // e.g. MEETING_INVITE, TASK_ASSIGNED, MENTION
+    title: varchar("title", { length: 200 }).notNull(),
+    body: text("body"),
+    href: varchar("href", { length: 300 }), // where clicking it goes
+    actorId: integer("actor_id").references(() => users.id, { onDelete: "set null" }), // who caused it
+    readAt: timestamp("read_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("notifications_user_idx").on(t.userId, t.createdAt), index("notifications_unread_idx").on(t.userId, t.readAt)],
+);

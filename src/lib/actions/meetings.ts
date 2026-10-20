@@ -1,5 +1,5 @@
 "use server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { assertClientName } from "@/lib/client-names";
+import { notify } from "@/lib/notifications";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import {
@@ -66,7 +67,14 @@ async function externalAttendees(meetingId: number): Promise<External[]> {
 }
 
 /** Sends the meeting invite / update / cancellation (with .ics) to the given users and outside attendees. */
-export async function notifyMeeting(meetingId: number, userIds: number[], method: "REQUEST" | "CANCEL", reason: string, external: External[] = []) {
+export async function notifyMeeting(
+  meetingId: number,
+  userIds: number[],
+  method: "REQUEST" | "CANCEL",
+  reason: string,
+  external: External[] = [],
+  actorId: number | null = null,
+) {
   if (!userIds.length && !external.length) return;
   const m = await db.query.meetings.findFirst({
     where: eq(schema.meetings.id, meetingId),
@@ -112,6 +120,18 @@ export async function notifyMeeting(meetingId: number, userIds: number[], method
     `<table style="font-size:14px;border-collapse:collapse">${rows
       .map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#6b7280;vertical-align:top;white-space:nowrap">${k}</td><td style="padding:4px 0">${esc(v).replace(/\n/g, "<br>")}</td></tr>`)
       .join("")}</table>`;
+
+  // In-app notification for each ERAM recipient, whether or not email is set up.
+  await notify(
+    people.map((p) => p.id),
+    {
+      kind: method === "CANCEL" ? "MEETING_CANCELLED" : reason === "Updated" ? "MEETING_UPDATED" : reason === "Confirmed" ? "MEETING_CONFIRMED" : "MEETING_INVITE",
+      title: `${verb}: ${m.title}`,
+      body: `${when}${where ? ` · ${where}` : ""}`,
+      href: `/meetings/${meetingId}`,
+      actorId,
+    },
+  );
 
   if (people.length) {
     const rows = table([
@@ -285,13 +305,13 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     const keysNow = new Set(external.map(emailKey));
     const externalAdded = external.filter((e) => !keysBefore.has(emailKey(e)));
     const externalRemoved = externalBefore.filter((e) => !keysNow.has(emailKey(e)));
-    if (live && (!wasLive || detailsChanged)) await notifyMeeting(meetingId, everyone, "REQUEST", wasLive ? "Updated" : "Meeting scheduled", external);
-    else if (live && (added.length || externalAdded.length)) await notifyMeeting(meetingId, added, "REQUEST", "Meeting invitation", externalAdded);
+    if (live && (!wasLive || detailsChanged)) await notifyMeeting(meetingId, everyone, "REQUEST", wasLive ? "Updated" : "Meeting scheduled", external, me.id);
+    else if (live && (added.length || externalAdded.length)) await notifyMeeting(meetingId, added, "REQUEST", "Meeting invitation", externalAdded, me.id);
     if (wasLive && (status === "CANCELLED" || status === "POSTPONED")) {
       await db.update(schema.meetings).set({ icsSequence: sequence + 1 }).where(eq(schema.meetings.id, meetingId));
-      await notifyMeeting(meetingId, [...everyone, ...removed], "CANCEL", "Cancelled", [...external, ...externalRemoved]);
+      await notifyMeeting(meetingId, [...everyone, ...removed], "CANCEL", "Cancelled", [...external, ...externalRemoved], me.id);
     }
-    if (live && (removed.length || externalRemoved.length)) await notifyMeeting(meetingId, removed, "CANCEL", "Cancelled", externalRemoved);
+    if (live && (removed.length || externalRemoved.length)) await notifyMeeting(meetingId, removed, "CANCEL", "Cancelled", externalRemoved, me.id);
   } catch (e) {
     return toFormError(e);
   }
@@ -314,8 +334,8 @@ export async function setMeetingStatus(id: number, status: MeetingStatus) {
   await logActivity(id, me.id, "STATUS_CHANGED", { from: m.status, to: status });
   const everyone = m.attendees.map((a) => a.userId);
   const external = await externalAttendees(id);
-  if (status === "CANCELLED" && LIVE.includes(m.status)) await notifyMeeting(id, everyone, "CANCEL", "Cancelled", external);
-  if (status === "CONFIRMED" && m.status !== "CONFIRMED") await notifyMeeting(id, everyone, "REQUEST", "Confirmed", external);
+  if (status === "CANCELLED" && LIVE.includes(m.status)) await notifyMeeting(id, everyone, "CANCEL", "Cancelled", external, me.id);
+  if (status === "CONFIRMED" && m.status !== "CONFIRMED") await notifyMeeting(id, everyone, "REQUEST", "Confirmed", external, me.id);
   revalidatePath("/meetings");
   redirect(status === "COMPLETED" ? `/meetings/${id}/brief?msg=completed` : `/meetings/${id}?msg=status`);
 }
@@ -324,10 +344,15 @@ export async function deleteMeeting(id: number) {
   const me = await requireUser();
   if (me.role !== "ADMIN") redirect(`/meetings/${id}?msg=denied`);
   const m = await loadEditable(me, id);
-  if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled", await externalAttendees(id));
+  if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled", await externalAttendees(id), me.id);
   await db.update(schema.meetingBriefs).set({ followUpMeetingId: null }).where(eq(schema.meetingBriefs.followUpMeetingId, id));
   await db.update(schema.meetings).set({ parentMeetingId: null }).where(eq(schema.meetings.parentMeetingId, id));
   await db.delete(schema.meetings).where(eq(schema.meetings.id, id));
+  // Its notifications stay (they say it was cancelled) but no longer link to the deleted meeting.
+  await db
+    .update(schema.notifications)
+    .set({ href: null })
+    .where(or(eq(schema.notifications.href, `/meetings/${id}`), like(schema.notifications.href, `/meetings/${id}/%`)));
   await audit(me.id, "MEETING_DELETED", "meeting", id, { title: m.title });
   revalidatePath("/meetings");
   redirect("/meetings?msg=deleted");

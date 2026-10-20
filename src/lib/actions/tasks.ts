@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
+import { notify } from "@/lib/notifications";
 import { PRIORITIES } from "@/lib/meetings";
 import {
   canEditTask,
@@ -32,6 +33,7 @@ async function loadTask(id: number) {
 async function notifyCompleted(taskId: number, me: SessionUser) {
   const task = await db.query.tasks.findFirst({ where: eq(schema.tasks.id, taskId), with: { createdBy: { columns: { id: true, email: true, fullName: true } } } });
   if (!task?.createdBy || task.createdBy.id === me.id) return;
+  await notify([task.createdBy.id], { kind: "TASK_COMPLETED", title: `Task completed: ${task.title}`, body: `Completed by ${me.name}`, href: `/tasks/${taskId}`, actorId: me.id });
   await sendMail(
     task.createdBy.email,
     `Task completed: ${task.title}`,
@@ -97,7 +99,7 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
         const [task] = await db.insert(schema.tasks).values({ ...data, createdById: me.id }).returning();
         await db.insert(schema.taskAssignees).values({ taskId: task.id, userId, viaGroupId });
         await logTaskActivity(task.id, me.id, "CREATED", { mode: "individual copy" });
-        await notifyTaskAssigned(task.id, [userId], me.name);
+        await notifyTaskAssigned(task.id, [userId], me.name, me.id);
         createdIds.push(task.id);
       }
       id = createdIds[0];
@@ -125,7 +127,7 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
     await db.delete(schema.taskGroups).where(eq(schema.taskGroups.taskId, taskId));
     if (groupIds.length) await db.insert(schema.taskGroups).values(groupIds.map((groupId) => ({ taskId, groupId })));
     if (before && (added.length || removed.length)) await logTaskActivity(taskId, me.id, "ASSIGNEES_CHANGED", { added, removed });
-    await notifyTaskAssigned(taskId, added.filter((u) => u !== me.id), me.name);
+    await notifyTaskAssigned(taskId, added.filter((u) => u !== me.id), me.name, me.id);
 
     // Status / progress on the same form
     const status = pick(TASK_STATUSES, str(fd, "status"), before?.status ?? "NOT_STARTED");
@@ -207,6 +209,10 @@ export async function addComment(id: number, _: ActionState, fd: FormData): Prom
     if (handles.length) {
       const users = await db.select({ id: schema.users.id, username: schema.users.username, fullName: schema.users.fullName, email: schema.users.email }).from(schema.users).where(eq(schema.users.status, "ACTIVE"));
       const mentioned = users.filter((u) => u.id !== me.id && handles.some((h) => u.username === h || u.fullName.toLowerCase().split(" ")[0] === h));
+      await notify(
+        mentioned.map((u) => u.id),
+        { kind: "MENTION", title: `${me.name} mentioned you on: ${task.title}`, body: body.length > 300 ? `${body.slice(0, 300)}…` : body, href: `/tasks/${id}`, actorId: me.id },
+      );
       for (const u of mentioned)
         await sendMail(
           u.email,

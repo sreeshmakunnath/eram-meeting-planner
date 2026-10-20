@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
+import { notify } from "@/lib/notifications";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { sendResetEmail, sendWelcomeEmail } from "./auth";
 
@@ -60,7 +61,7 @@ async function sendAccountReadyEmail(user: { email: string; fullName: string; us
 }
 
 /** Adds the user to newly selected groups and emails them about each new group. */
-async function syncMemberships(userId: number, email: string, fullName: string, groupIds: number[]) {
+async function syncMemberships(userId: number, email: string, fullName: string, groupIds: number[], actorId: number) {
   const current = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, userId));
   const currentIds = current.map((m) => m.groupId);
   const toAdd = groupIds.filter((g) => !currentIds.includes(g));
@@ -69,7 +70,9 @@ async function syncMemberships(userId: number, email: string, fullName: string, 
     await db.delete(schema.groupMembers).where(and(eq(schema.groupMembers.userId, userId), inArray(schema.groupMembers.groupId, toRemove)));
   if (toAdd.length) {
     await db.insert(schema.groupMembers).values(toAdd.map((groupId) => ({ groupId, userId })));
-    const added = await db.select({ name: schema.groups.name }).from(schema.groups).where(inArray(schema.groups.id, toAdd));
+    const added = await db.select({ id: schema.groups.id, name: schema.groups.name }).from(schema.groups).where(inArray(schema.groups.id, toAdd));
+    for (const g of added)
+      await notify([userId], { kind: "GROUP_ADDED", title: `You were added to ${g.name}`, body: "Meetings and tasks for this group include you.", href: `/groups/${g.id}`, actorId });
     await sendMail(
       email,
       `You've been added to ${added.map((g) => g.name).join(", ")}`,
@@ -93,7 +96,7 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
       .values({ ...data, passwordHash: password ? await hashPassword(password) : null, createdById: admin.id, updatedById: admin.id })
       .returning();
     id = user.id;
-    await syncMemberships(user.id, user.email, user.fullName, ints(fd, "groupIds"));
+    await syncMemberships(user.id, user.email, user.fullName, ints(fd, "groupIds"), admin.id);
     if (password) await sendAccountReadyEmail(user);
     else await sendWelcomeEmail(user);
     await audit(admin.id, "USER_CREATED", "user", user.id, { username: user.username, role: user.role, passwordSetByAdmin: !!password });
@@ -121,7 +124,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
       await db.update(schema.users).set({ passwordHash: await hashPassword(password), failedLogins: 0, lockedUntil: null }).where(eq(schema.users.id, id));
       await audit(admin.id, "PASSWORD_SET_BY_ADMIN", "user", id);
     }
-    const groups = await syncMemberships(id, data.email, data.fullName, ints(fd, "groupIds"));
+    const groups = await syncMemberships(id, data.email, data.fullName, ints(fd, "groupIds"), admin.id);
     const changed = Object.keys(data).filter((k) => String(before[k as keyof typeof before] ?? "") !== String(data[k as keyof typeof data] ?? ""));
     await audit(admin.id, "USER_UPDATED", "user", id, { changed, groupsAdded: groups.added, groupsRemoved: groups.removed });
     revalidatePath("/admin/users");

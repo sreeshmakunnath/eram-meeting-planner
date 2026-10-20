@@ -9,6 +9,7 @@ import { syncBriefTasks } from "@/lib/brief-tasks";
 import { notifyTaskAssigned } from "@/lib/tasks";
 import { FormError, int, ints, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
+import { notify } from "@/lib/notifications";
 import { canEditMeeting, canWriteBrief, fmtDay, fmtPlainDate, fmtTime, logActivity } from "@/lib/meetings";
 
 export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -120,10 +121,10 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
         await db.update(schema.meetings).set({ followUpDate: data.nextFollowUpDate }).where(eq(schema.meetings.id, meetingId));
         await logActivity(f.id, me.id, "CREATED", { status: "TO_BE_SCHEDULED", from: `brief of meeting #${meetingId}` });
       }
-      await emailBrief(meetingId);
+      await emailBrief(meetingId, me.id);
       // Every agreed action becomes (or updates) a task in the task planner
       const synced = await syncBriefTasks(db, briefId, me.id);
-      for (const c of synced.created) await notifyTaskAssigned(c.taskId, c.userIds, me.name);
+      for (const c of synced.created) await notifyTaskAssigned(c.taskId, c.userIds, me.name, me.id);
     }
   } catch (e) {
     return toFormError(e);
@@ -133,7 +134,7 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
   return { ok: "Draft saved." };
 }
 
-async function emailBrief(meetingId: number) {
+async function emailBrief(meetingId: number, actorId: number) {
   const m = await db.query.meetings.findFirst({
     where: eq(schema.meetings.id, meetingId),
     with: {
@@ -166,6 +167,13 @@ async function emailBrief(meetingId: number) {
     <p style="margin:12px 0 4px;color:#1F3864"><b>Agreed actions</b></p>${actionsHtml}
     <p>Next follow-up: <b>${m.brief.nextFollowUpDate ? fmtPlainDate(m.brief.nextFollowUpDate) : "—"}</b></p>
     ${button(appUrl(`/meetings/${meetingId}/brief/print`), "Open full brief")}`;
+  await notify([...recipients.keys()], {
+    kind: "BRIEF_SUBMITTED",
+    title: `Meeting Brief submitted: ${m.title}`,
+    body: `${m.client?.name ?? m.title} · ${fmtDay(m.startAt)}${m.brief.actions.length ? ` · ${m.brief.actions.length} agreed action${m.brief.actions.length === 1 ? "" : "s"}` : ""}`,
+    href: `/meetings/${meetingId}/brief`,
+    actorId,
+  });
   for (const r of recipients.values()) {
     await sendMail(r.email, `Meeting Brief: ${m.title}`, "Meeting Brief", `<p>Hello ${esc(r.fullName)},</p>${body}`);
   }

@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { esc, sendMail } from "@/lib/mail";
+import { notify } from "@/lib/notifications";
 import { GROUP_TYPES } from "@/lib/queries";
 
 export async function saveGroup(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -49,6 +50,13 @@ export async function saveGroup(_: ActionState, fd: FormData): Promise<ActionSta
       const [lead] = data.leadUserId
         ? await db.select({ fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.id, data.leadUserId))
         : [];
+      await notify(toAdd, {
+        kind: "GROUP_ADDED",
+        title: `You were added to ${data.name}`,
+        body: lead ? `Led by ${lead.fullName}. Meetings and tasks for this group include you.` : "Meetings and tasks for this group include you.",
+        href: `/groups/${id}`,
+        actorId: admin.id,
+      });
       for (const u of added) {
         await sendMail(
           u.email,

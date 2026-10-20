@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import type { SessionUser } from "./auth";
 import { appUrl, button, esc, sendMail } from "./mail";
 import { fmtPlainDate } from "./meetings";
+import { notify } from "./notifications";
 
 export const TASK_STATUSES = ["NOT_STARTED", "STARTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
@@ -94,14 +95,21 @@ export async function expandAssignees(userIds: number[], groupIds: number[]) {
   return map;
 }
 
-/** "Task assigned to you" email. */
-export async function notifyTaskAssigned(taskId: number, userIds: number[], byName: string) {
+/** "Task assigned to you" email and in-app notification. */
+export async function notifyTaskAssigned(taskId: number, userIds: number[], byName: string, actorId: number | null = null) {
   if (!userIds.length) return;
   const task = await db.query.tasks.findFirst({
     where: eq(t.id, taskId),
     with: { client: { columns: { name: true } }, meeting: { columns: { title: true } } },
   });
   if (!task) return;
+  await notify(userIds, {
+    kind: "TASK_ASSIGNED",
+    title: `Task assigned: ${task.title}`,
+    body: [`From ${byName}`, task.dueDate ? `due ${fmtPlainDate(task.dueDate)}` : "no due date", task.client?.name, task.meeting ? `from meeting ${task.meeting.title}` : null].filter(Boolean).join(" · "),
+    href: `/tasks/${taskId}`,
+    actorId,
+  });
   const people = await db.select({ email: schema.users.email, fullName: schema.users.fullName }).from(schema.users).where(inArray(schema.users.id, userIds));
   for (const p of people) {
     await sendMail(
