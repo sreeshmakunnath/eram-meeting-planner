@@ -1,8 +1,10 @@
 import { and, asc, eq, exists, gte, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import Link from "next/link";
-import { Notice, PageHeader, Tabs } from "@/components/ui";
+import { fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
-import { clientVisibleTo } from "@/lib/access";
+import { clientVisibleTo, scopeToBu, selectableBus } from "@/lib/access";
+import { recentActivity } from "@/lib/activity-feed";
+import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 import { meetingsBetween } from "@/lib/meeting-queries";
@@ -26,7 +28,7 @@ function Tile({ label, value, href }: { label: string; value: number | string; h
 const count = sql<number>`count(*)`.mapWith(Number);
 const m = schema.meetings;
 
-export default async function Dashboard({ searchParams }: { searchParams: { denied?: string; tab?: string } }) {
+export default async function Dashboard({ searchParams }: { searchParams: { denied?: string; tab?: string; bu?: string } }) {
   const me = await requireUser();
   const admin = isAdmin(me);
   const tab = admin && searchParams.tab === "org" ? "org" : "mine";
@@ -44,7 +46,7 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
           ]}
         />
       )}
-      {tab === "org" ? <OrgOverview me={me} /> : <MyWork me={me} />}
+      {tab === "org" ? <OrgOverview me={me} bu={searchParams.bu} /> : <MyWork me={me} />}
     </>
   );
 }
@@ -171,41 +173,78 @@ async function MyWork({ me }: { me: SessionUser }) {
   );
 }
 
-async function OrgOverview({ me }: { me: SessionUser }) {
+async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
   const today = todayRiyadh();
-  const [stages, org, [monthCount], [tbs], statusRows, orgOverdue] = await Promise.all([
-    db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me))).groupBy(schema.clients.bdStage),
-    orgStats(me),
+  const now = new Date();
+  // A picked business unit narrows every card to that unit; otherwise everything the Admin can see.
+  const units = await selectableBus(me);
+  const scoped = scopeToBu(me, Number(bu));
+  const viewer = scoped ?? me;
+  const unit = scoped ? units.find((u) => u.id === scoped.buIds[0]) : undefined;
+  const q = (path: string) => (scoped ? `${path}${path.includes("?") ? "&" : "?"}bu=${scoped.buIds[0]}` : path);
+
+  const [stages, org, [monthCount], [tbs], statusRows, orgOverdue, upcoming, activity] = await Promise.all([
+    db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(viewer))).groupBy(schema.clients.bdStage),
+    orgStats(viewer),
     db
       .select({ n: count })
       .from(m)
-      .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]), visibleTo(me))),
-    db.select({ n: count }).from(m).where(and(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"]), visibleTo(me))),
-    clientStatusRows(me),
-    listTasks(me, { scope: "all", bucket: "overdue" }, 1000),
+      .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]), visibleTo(viewer))),
+    db.select({ n: count }).from(m).where(and(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"]), visibleTo(viewer))),
+    clientStatusRows(viewer),
+    listTasks(viewer, { scope: "all", bucket: "overdue" }, 1000),
+    meetingsBetween(viewer, now, new Date(now.getTime() + 7 * 86400_000), notInArray(m.status, ["CANCELLED", "POSTPONED"])),
+    recentActivity(viewer, 15),
   ]);
   const stageCount = (s: string) => stages.find((x) => x.stage === s)?.n ?? 0;
   const flagCount = (f: Flag) => statusRows.filter((r) => r.flag === f).length;
   // Client status segments: state colours (good / warning / critical) then two neutrals; validated as an adjacent set.
   const flagColor: Record<Flag, string> = { BOOKED: "#0ca30c", TO_SCHEDULE: "#fab219", OVERDUE: "#d03b3b", NO_NEXT_STEP: "#898781", NO_MEETING: "#d6d4cc" };
+  const kindLabel = { meeting: "Meeting", task: "Task", client: "Client" } as const;
 
   return (
     <>
+      {units.length > 1 && (
+        <form className="mb-4 flex flex-wrap items-center gap-3">
+          <input type="hidden" name="tab" value="org" />
+          <label htmlFor="bu" className="text-sm font-semibold text-navy">
+            Business unit
+          </label>
+          <AutoSubmitSelect id="bu" name="bu" defaultValue={scoped ? String(scoped.buIds[0]) : ""} className="input w-auto min-w-[14rem]">
+            <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
+            {units.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </AutoSubmitSelect>
+          <noscript>
+            <button className="btn-secondary">Show</button>
+          </noscript>
+          {unit && <span className="text-sm text-slate-500">Clients, meetings and tasks of {unit.name} only.</span>}
+        </form>
+      )}
+
       <div className="mb-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiTile
           label="Meetings held this month"
           value={org.heldThisMonth}
           delta={{ value: org.heldThisMonth - org.heldLastMonth, vs: "last month" }}
-          href="/meetings?status=COMPLETED"
+          href={q("/meetings?status=COMPLETED")}
         />
         <KpiTile label="Meetings held · 12 months" value={org.heldYear} note={`${org.upcoming7} booked in the next 7 days`} href="/meetings/calendar" />
         <KpiTile
           label="Active clients"
           value={org.clients.active}
           note={org.clients.pending ? <span className="font-semibold text-amber-700">{org.clients.pending} waiting for review</span> : `${org.clients.inactive} inactive`}
-          href={org.clients.pending ? "/clients?status=PENDING_REVIEW" : "/clients"}
+          href={q(org.clients.pending ? "/clients?status=PENDING_REVIEW" : "/clients")}
         />
-        <KpiTile label="Active users" value={org.activeUsers} note={`Across ${org.buRows.filter((b) => b.id !== null).length} business units`} href="/admin/users" />
+        <KpiTile
+          label="Active users"
+          value={org.activeUsers}
+          note={unit ? `In ${unit.name}` : `Across ${org.buRows.filter((b) => b.id !== null).length} business units`}
+          href={q("/admin/users")}
+        />
       </div>
 
       <div className="mb-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
@@ -219,7 +258,7 @@ async function OrgOverview({ me }: { me: SessionUser }) {
         <section className="card p-4 xl:col-span-3">
           <div className="mb-3 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">Client status</h3>
-            <Link href="/reports/client-status" className="link text-xs">
+            <Link href={q("/reports/client-status")} className="link text-xs">
               Full report →
             </Link>
           </div>
@@ -230,7 +269,7 @@ async function OrgOverview({ me }: { me: SessionUser }) {
               label: FLAGS[f].label,
               n: flagCount(f),
               color: flagColor[f],
-              href: `/reports/client-status?flag=${f}`,
+              href: q(`/reports/client-status?flag=${f}`),
             }))}
           />
         </section>
@@ -238,10 +277,10 @@ async function OrgOverview({ me }: { me: SessionUser }) {
           <h3 className="mb-2 font-semibold text-navy">Needs attention</h3>
           <ul className="divide-y divide-slate-100 text-sm">
             {[
-              { label: "Follow-ups overdue", n: flagCount("OVERDUE"), href: "/reports/client-status?flag=OVERDUE", tone: "text-red-700" },
-              { label: "Overdue tasks", n: orgOverdue.length, href: "/tasks?scope=all&bucket=overdue", tone: "text-red-700" },
-              { label: "Meetings to be scheduled", n: tbs.n, href: "/meetings?status=TO_BE_SCHEDULED", tone: "text-amber-700" },
-              { label: "Clients waiting for review", n: org.clients.pending, href: "/clients?status=PENDING_REVIEW", tone: "text-amber-700" },
+              { label: "Follow-ups overdue", n: flagCount("OVERDUE"), href: q("/reports/client-status?flag=OVERDUE"), tone: "text-red-700" },
+              { label: "Overdue tasks", n: orgOverdue.length, href: q("/tasks?scope=all&bucket=overdue"), tone: "text-red-700" },
+              { label: "Meetings to be scheduled", n: tbs.n, href: q("/meetings?status=TO_BE_SCHEDULED"), tone: "text-amber-700" },
+              { label: "Clients waiting for review", n: org.clients.pending, href: q("/clients?status=PENDING_REVIEW"), tone: "text-amber-700" },
               { label: "Meetings this month (all)", n: monthCount.n, href: "/meetings/calendar", tone: "text-navy" },
             ].map((a) => (
               <li key={a.label}>
@@ -255,24 +294,80 @@ async function OrgOverview({ me }: { me: SessionUser }) {
         </section>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-12">
-        <section className="card p-4 lg:col-span-5 xl:col-span-4">
+      <div className="mb-4 grid gap-4 lg:grid-cols-12">
+        <section className="card p-4 lg:col-span-4 xl:col-span-3">
           <div className="mb-3 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">BD pipeline</h3>
             <span className="text-xs text-slate-500">Clients by stage (excl. inactive)</span>
           </div>
-          <OrderedBars items={BD_STAGES.map((s) => ({ key: s, label: BD_STAGE_LABELS[s], n: stageCount(s), href: `/clients?stage=${s}&status=ALL` }))} />
+          <OrderedBars items={BD_STAGES.map((s) => ({ key: s, label: BD_STAGE_LABELS[s], n: stageCount(s), href: q(`/clients?stage=${s}&status=ALL`) }))} />
         </section>
-        <section className="card p-4 lg:col-span-7 xl:col-span-8">
+        <section className="card p-4 lg:col-span-8 xl:col-span-4">
           <div className="mb-2 flex items-baseline justify-between">
-            <h3 className="font-semibold text-navy">Business units</h3>
-            <span className="text-xs text-slate-500">Bars compare units within each column</span>
+            <h3 className="font-semibold text-navy">Upcoming meetings</h3>
+            <span className="text-xs text-slate-500">Next 7 days</span>
           </div>
-          <div className="max-h-[18rem] overflow-y-auto">
-            <BuTable rows={org.buRows} />
+          {upcoming.length === 0 ? (
+            <p className="text-sm text-slate-500">Nothing booked in the next 7 days.</p>
+          ) : (
+            <ul className="max-h-[18rem] divide-y divide-slate-100 overflow-y-auto text-sm">
+              {upcoming.map((mt) => (
+                <li key={mt.id}>
+                  <Link href={`/meetings/${mt.id}`} className="flex items-start justify-between gap-3 py-2 hover:bg-slate-50">
+                    <span className="min-w-0">
+                      <span className="block truncate font-medium text-slate-700">{mt.title}</span>
+                      {mt.client && <span className="block truncate text-xs text-slate-500">{mt.client}</span>}
+                    </span>
+                    <span className="shrink-0 text-right text-xs text-slate-500">
+                      {fmtDay(mt.startAt)}
+                      <span className="block">{fmtTime(mt.startAt)}</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+        <section className="card p-4 lg:col-span-12 xl:col-span-5">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Recent activity</h3>
+            <span className="text-xs text-slate-500">Meetings, tasks and clients</span>
           </div>
+          {activity.length === 0 ? (
+            <p className="text-sm text-slate-500">No activity yet.</p>
+          ) : (
+            <ul className="max-h-[18rem] divide-y divide-slate-100 overflow-y-auto text-sm">
+              {activity.map((a, i) => (
+                <li key={`${a.kind}-${a.id}-${i}`}>
+                  <Link href={a.href} className="flex items-start justify-between gap-3 py-2 hover:bg-slate-50">
+                    <span className="min-w-0">
+                      <span className="block truncate text-slate-700">
+                        <b>{a.user ?? "System"}</b> · {labelize(a.action)}
+                      </span>
+                      <span className="block truncate text-xs text-slate-500">
+                        {kindLabel[a.kind]}: {a.title}
+                      </span>
+                    </span>
+                    <span className="shrink-0 whitespace-nowrap text-xs text-slate-500">{fmtDateTime(a.at)}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </div>
+
+      {!scoped && (
+        <section className="card p-4">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Business units</h3>
+            <span className="text-xs text-slate-500">Click a unit for its overview · bars compare units within each column</span>
+          </div>
+          <div className="max-h-[18rem] overflow-y-auto">
+            <BuTable rows={org.buRows.map((r) => ({ ...r, href: r.id ? `/?tab=org&bu=${r.id}` : undefined }))} />
+          </div>
+        </section>
+      )}
     </>
   );
 }

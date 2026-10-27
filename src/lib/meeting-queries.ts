@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, exists, gte, ilike, inArray, lt, notInArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { SessionUser } from "./auth";
-import { MEETING_STATUSES, PRIORITIES, riyadh, visibleTo, type MeetingStatus } from "./meetings";
+import { MEETING_STATUSES, meetingInMyBus, PRIORITIES, riyadh, visibleTo, type MeetingStatus } from "./meetings";
 
 export type MeetingFilters = {
   q?: string;
@@ -12,6 +12,7 @@ export type MeetingFilters = {
   group?: string;
   from?: string; // yyyy-mm-dd (Riyadh)
   to?: string;
+  bu?: string; // business unit
 };
 
 const m = schema.meetings;
@@ -45,6 +46,7 @@ export function meetingWhere(me: SessionUser, f: MeetingFilters): SQL | undefine
           .where(and(eq(schema.meetingGroups.meetingId, m.id), eq(schema.meetingGroups.groupId, Number(f.group)))),
       ),
     );
+  if (f.bu) where.push(meetingInMyBus({ ...me, buIds: [Number(f.bu)] }));
   if (f.from && /^\d{4}-\d{2}-\d{2}$/.test(f.from)) where.push(gte(m.startAt, riyadh(f.from, "00:00")));
   if (f.to && /^\d{4}-\d{2}-\d{2}$/.test(f.to)) where.push(lt(m.startAt, new Date(riyadh(f.to, "00:00").getTime() + 86400_000)));
   const list = where.filter(Boolean) as SQL[];

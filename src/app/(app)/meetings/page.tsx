@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BuFilterNotice } from "@/components/bu-filter-notice";
 import { Badge, Empty, Notice, PageHeader, Tabs } from "@/components/ui";
 import { isSuperAdmin, requireUser } from "@/lib/auth";
 import { listMeetings, type MeetingFilters } from "@/lib/meeting-queries";
@@ -46,6 +47,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
           { href: "/meetings/calendar", label: "Calendar" },
         ]}
       />
+      <BuFilterNotice bu={searchParams.bu} params={searchParams} path="/meetings" />
       {searchParams.msg === "deleted" && <Notice tone="ok">Meeting deleted.</Notice>}
       {searchParams.msg === "imported" && <Notice tone="ok">Import finished.</Notice>}
 

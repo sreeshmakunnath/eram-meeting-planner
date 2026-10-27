@@ -141,7 +141,7 @@ export function OrderedBars({ items }: { items: { key: string; label: string; n:
 }
 
 /** Table with an inline bar per measure; each column is scaled to its own maximum. */
-export function BuTable({ rows }: { rows: { id: number | null; name: string; users: number; held: number; clients: number }[] }) {
+export function BuTable({ rows }: { rows: { id: number | null; name: string; users: number; held: number; clients: number; href?: string }[] }) {
   const max = {
     users: Math.max(1, ...rows.map((r) => r.users)),
     held: Math.max(1, ...rows.map((r) => r.held)),
@@ -172,7 +172,15 @@ export function BuTable({ rows }: { rows: { id: number | null; name: string; use
         <tbody className="divide-y divide-slate-100">
           {rows.map((r) => (
             <tr key={r.id ?? "none"} className={r.id === null ? "text-slate-500" : ""}>
-              <td className="py-2 pr-4 font-medium text-slate-700">{r.name}</td>
+              <td className="py-2 pr-4 font-medium text-slate-700">
+                {r.href ? (
+                  <Link href={r.href} className="link">
+                    {r.name}
+                  </Link>
+                ) : (
+                  r.name
+                )}
+              </td>
               {cols.map((c) => (
                 <td key={c.key} className="w-1/4 py-2 pr-4">
                   <div className="flex items-center gap-2">

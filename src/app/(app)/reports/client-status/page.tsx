@@ -2,17 +2,18 @@ import Link from "next/link";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { Badge, Empty, labelize, PageHeader } from "@/components/ui";
 import { updateBdStage } from "@/lib/actions/clients";
+import { scopeToBu } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
 import { fmtDay, fmtPlainDate, STATUS_LABEL } from "@/lib/meetings";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 
-type Search = { flag?: string; stage?: string; owner?: string; q?: string };
+type Search = { flag?: string; stage?: string; owner?: string; q?: string; bu?: string };
 const FLAG_ORDER: Flag[] = ["OVERDUE", "TO_SCHEDULE", "BOOKED", "NO_NEXT_STEP", "NO_MEETING"];
 
 export default async function ClientStatusPage({ searchParams }: { searchParams: Search }) {
   const me = await requireUser();
-  const all = await clientStatusRows(me);
+  const all = await clientStatusRows(scopeToBu(me, Number(searchParams.bu)) ?? me); // ?bu= from the BU overview
   const owners = [...new Map(all.filter((r) => r.ownerId).map((r) => [r.ownerId!, r.owner!])).entries()];
   const rows = all
     .filter((r) => !searchParams.flag || r.flag === searchParams.flag)

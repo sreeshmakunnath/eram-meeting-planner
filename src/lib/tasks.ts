@@ -40,7 +40,7 @@ export const CATEGORY_LABEL: Record<TaskCategory, string> = {
 const t = schema.tasks;
 
 /** A task in one of the Admin's business units: its client or meeting is, or its creator or an assignee is a member. */
-function taskInMyBus(me: SessionUser): SQL {
+export function taskInMyBus(me: SessionUser): SQL {
   return or(
     clientInMyBus(me, t.clientId),
     inArray(t.meetingId, db.select({ id: schema.meetings.id }).from(schema.meetings).where(meetingInMyBus(me))),

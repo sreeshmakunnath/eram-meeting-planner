@@ -89,6 +89,23 @@ export async function userBuIds(userId: number) {
   return rows.map((r) => r.businessUnitId);
 }
 
+/** Business units this person can pick for overviews and filters: all active ones for a Super Admin, otherwise their own. */
+export const selectableBus = (me: SessionUser) =>
+  db
+    .select({ id: schema.businessUnits.id, name: schema.businessUnits.name })
+    .from(schema.businessUnits)
+    .where(and(eq(schema.businessUnits.active, true), isSuperAdmin(me) ? undefined : inArray(schema.businessUnits.id, me.buIds)))
+    .orderBy(schema.businessUnits.name);
+
+/**
+ * A viewer limited to exactly one business unit, for the BU overview: it sees that unit's clients, meetings
+ * and tasks and nothing personal (id 0 owns and attends nothing). Admins only; null when they have no access to the unit.
+ */
+export function scopeToBu(me: SessionUser, buId: number): SessionUser | null {
+  if (!buId || !isAdmin(me) || (!isSuperAdmin(me) && !me.buIds.includes(buId))) return null;
+  return { ...me, id: 0, role: "ADMIN", buIds: [buId] };
+}
+
 /** Business units a person may pick on a form: all for a Super Admin, otherwise their own. */
 export const allowedBuIds = (me: SessionUser, all: number[]) => (isSuperAdmin(me) ? all : all.filter((id) => me.buIds.includes(id)));
 

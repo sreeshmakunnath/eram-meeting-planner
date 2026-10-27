@@ -2,7 +2,7 @@ import { and, asc, eq, exists, gte, ilike, inArray, isNotNull, lt, notInArray, o
 import { db, schema } from "@/db";
 import type { SessionUser } from "./auth";
 import { PRIORITIES, todayRiyadh } from "./meetings";
-import { OPEN_STATUSES, TASK_CATEGORIES, TASK_STATUSES, taskVisibleTo, type TaskStatus } from "./tasks";
+import { OPEN_STATUSES, TASK_CATEGORIES, TASK_STATUSES, taskInMyBus, taskVisibleTo, type TaskStatus } from "./tasks";
 
 export type TaskFilters = {
   scope?: string; // "mine" (assigned to me, default) | "created" | "all"
@@ -15,6 +15,7 @@ export type TaskFilters = {
   group?: string;
   priority?: string;
   q?: string;
+  bu?: string; // business unit
 };
 
 const t = schema.tasks;
@@ -71,6 +72,7 @@ export function taskWhere(me: SessionUser, f: TaskFilters): SQL | undefined {
           .where(and(eq(schema.taskGroups.taskId, t.id), eq(schema.taskGroups.groupId, Number(f.group)))),
       ),
     );
+  if (f.bu) w.push(taskInMyBus({ ...me, buIds: [Number(f.bu)] }));
   if (f.q) w.push(or(ilike(t.title, `%${f.q}%`), ilike(t.description, `%${f.q}%`), ilike(schema.clients.name, `%${f.q}%`)));
   const list = w.filter(Boolean) as SQL[];
   return list.length ? and(...list) : undefined;

@@ -1,4 +1,5 @@
 import { getServerSession } from "next-auth";
+import { scopeToBu } from "@/lib/access";
 import { authOptions } from "@/lib/auth";
 import { clientStatusRows, FLAGS } from "@/lib/client-status";
 import { buildWorkbook, xlDate, xlsxResponse } from "@/lib/excel";
@@ -9,7 +10,7 @@ export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
   const p = new URL(req.url).searchParams;
-  const rows = (await clientStatusRows(session.user))
+  const rows = (await clientStatusRows(scopeToBu(session.user, Number(p.get("bu"))) ?? session.user))
     .filter((r) => !p.get("flag") || r.flag === p.get("flag"))
     .filter((r) => !p.get("stage") || r.bdStage === p.get("stage"))
     .filter((r) => !p.get("owner") || String(r.ownerId) === p.get("owner"))
