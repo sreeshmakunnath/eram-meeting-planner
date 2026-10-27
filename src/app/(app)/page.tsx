@@ -4,6 +4,7 @@ import { fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@/components/ui
 import { db, schema } from "@/db";
 import { clientVisibleTo, scopeToBu, selectableBus } from "@/lib/access";
 import { recentActivity } from "@/lib/activity-feed";
+import { taskStats } from "@/lib/task-stats";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
@@ -183,7 +184,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
   const unit = scoped ? units.find((u) => u.id === scoped.buIds[0]) : undefined;
   const q = (path: string) => (scoped ? `${path}${path.includes("?") ? "&" : "?"}bu=${scoped.buIds[0]}` : path);
 
-  const [stages, org, [monthCount], [tbs], statusRows, orgOverdue, upcoming, activity] = await Promise.all([
+  const [stages, org, [monthCount], [tbs], statusRows, tasks, upcoming, activity] = await Promise.all([
     db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(viewer))).groupBy(schema.clients.bdStage),
     orgStats(viewer),
     db
@@ -192,7 +193,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
       .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]), visibleTo(viewer))),
     db.select({ n: count }).from(m).where(and(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"]), visibleTo(viewer))),
     clientStatusRows(viewer),
-    listTasks(viewer, { scope: "all", bucket: "overdue", bu: scoped ? String(scoped.buIds[0]) : undefined }, 1000), // same filter as the linked list
+    taskStats(viewer, scoped?.buIds[0]), // same BU rule as the linked task lists
     meetingsBetween(viewer, now, new Date(now.getTime() + 7 * 86400_000), notInArray(m.status, ["CANCELLED", "POSTPONED"])),
     recentActivity(viewer, 15),
   ]);
@@ -278,7 +279,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
           <ul className="divide-y divide-slate-100 text-sm">
             {[
               { label: "Follow-ups overdue", n: flagCount("OVERDUE"), href: q("/reports/client-status?flag=OVERDUE"), tone: "text-red-700" },
-              { label: "Overdue tasks", n: orgOverdue.length, href: q("/tasks?scope=all&bucket=overdue"), tone: "text-red-700" },
+              { label: "Overdue tasks", n: tasks.totals.overdue, href: q("/tasks?scope=all&bucket=overdue"), tone: "text-red-700" },
               { label: "Meetings to be scheduled", n: tbs.n, href: q("/meetings?status=TO_BE_SCHEDULED"), tone: "text-amber-700" },
               { label: "Clients waiting for review", n: org.clients.pending, href: q("/clients?status=PENDING_REVIEW"), tone: "text-amber-700" },
               { label: "Meetings this month (all)", n: monthCount.n, href: "/meetings/calendar", tone: "text-navy" },
@@ -291,6 +292,76 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
               </li>
             ))}
           </ul>
+        </section>
+      </div>
+
+      <div className="mb-4 grid gap-4 lg:grid-cols-12">
+        <section className="card p-4 lg:col-span-4 xl:col-span-3">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Tasks</h3>
+            <Link href="/reports/tasks" className="link text-xs">
+              Task report →
+            </Link>
+          </div>
+          <div className="grid grid-cols-3 gap-2 lg:grid-cols-1">
+            {[
+              { label: "Open", n: tasks.totals.open, href: q("/tasks?scope=all&bucket=open"), tone: "text-navy", note: null },
+              { label: "Overdue", n: tasks.totals.overdue, href: q("/tasks?scope=all&bucket=overdue"), tone: "text-red-600", note: null },
+              { label: "Completed", n: tasks.totals.completed, href: q("/tasks?scope=all&bucket=completed"), tone: "text-emerald-700", note: `${tasks.totals.completed30} in the last 30 days` },
+            ].map((s) => (
+              <Link key={s.label} href={s.href} className="rounded-md border border-slate-200 px-3 py-2 transition hover:border-brand/40">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{s.label}</div>
+                <div className={`text-2xl font-bold tabular-nums ${s.n ? s.tone : "text-slate-400"}`}>{s.n}</div>
+                {s.note && <div className="text-xs text-slate-500">{s.note}</div>}
+              </Link>
+            ))}
+          </div>
+        </section>
+        <section className="card p-4 lg:col-span-8 xl:col-span-9">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Tasks by assignee</h3>
+            <span className="text-xs text-slate-500">Click a number for the list · a task with several people counts for each</span>
+          </div>
+          {tasks.people.length === 0 ? (
+            <p className="text-sm text-slate-500">No tasks assigned yet.</p>
+          ) : (
+            <div className="max-h-[16rem] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="py-2 pr-4">Assignee</th>
+                    <th className="py-2 pr-4 text-right">Open</th>
+                    <th className="py-2 pr-4 text-right">Overdue</th>
+                    <th className="py-2 text-right">Completed</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {tasks.people.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="py-1.5 pr-4 font-medium text-slate-700">{p.name}</td>
+                      {(
+                        [
+                          ["open", p.open, "text-navy"],
+                          ["overdue", p.overdue, "text-red-600"],
+                          ["completed", p.completed, "text-emerald-700"],
+                        ] as const
+                      ).map(([bucket, v, tone]) => (
+                        <td key={bucket} className={`py-1.5 text-right tabular-nums ${bucket === "completed" ? "" : "pr-4"}`}>
+                          {v ? (
+                            <Link href={q(`/tasks?scope=all&bucket=${bucket}&user=${p.id}`)} className={`font-semibold hover:underline ${tone}`}>
+                              {v}
+                            </Link>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </div>
 

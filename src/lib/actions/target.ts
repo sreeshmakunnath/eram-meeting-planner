@@ -1,35 +1,62 @@
 "use server";
 import ExcelJS from "exceljs";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { canManageClient } from "@/lib/access";
 import { requireSuperAdmin, requireUser } from "@/lib/auth";
 import { isSimilar } from "@/lib/similar";
-import { CATEGORY_LABEL, logTaskActivity, type TaskCategory, type TaskStatus } from "@/lib/tasks";
+import type { ActionState } from "@/components/action-form";
+import { FormError, int, str, toFormError } from "@/lib/form";
+import { CATEGORY_LABEL, logTaskActivity, notifyTaskAssigned, type TaskCategory, type TaskStatus } from "@/lib/tasks";
 import { BD_CATEGORIES } from "@/lib/target-schedule";
 import { asDate, norm, text } from "@/lib/xl-read";
 
-/** Creates the four standard BD tasks (research, MIR, approach, follow-up) a client is missing. */
-export async function createBdTasks(clientId: number) {
-  const me = await requireUser();
-  const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
-  if (!client || !(await canManageClient(me, client))) return;
-  const existing = await db
-    .select({ category: schema.tasks.category })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.clientId, clientId), ne(schema.tasks.status, "CANCELLED"), isNull(schema.tasks.sourceBriefId)));
-  const owner = client.accountOwnerId ?? me.id;
-  for (const cat of BD_CATEGORIES.filter((c) => !existing.some((e) => e.category === c))) {
-    const [t] = await db
-      .insert(schema.tasks)
-      .values({ title: `${CATEGORY_LABEL[cat]} – ${client.name}`, category: cat, clientId, priority: "HIGH", createdById: me.id })
-      .returning();
-    await db.insert(schema.taskAssignees).values({ taskId: t.id, userId: owner });
-    await logTaskActivity(t.id, me.id, "CREATED", { from: "Target Schedule" });
+/**
+ * Creates the BD tasks (research, MIR, approach, follow-up) picked in the target schedule popup, each with its
+ * own title, person and due date. Categories the client already has are skipped.
+ */
+export async function createBdTasks(clientId: number, _: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const me = await requireUser();
+    const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
+    if (!client || !(await canManageClient(me, client))) throw new FormError("Only an Admin of this client's business units or the account owner can create its BD tasks.");
+    const existing = await db
+      .select({ category: schema.tasks.category })
+      .from(schema.tasks)
+      .where(and(eq(schema.tasks.clientId, clientId), ne(schema.tasks.status, "CANCELLED"), isNull(schema.tasks.sourceBriefId), isNull(schema.tasks.parentTaskId)));
+    const picked = fd.getAll("categories").map(String);
+    const cats = BD_CATEGORIES.filter((c) => picked.includes(c) && !existing.some((e) => e.category === c));
+    if (!cats.length) throw new FormError("Tick at least one task to create.");
+
+    const plan = cats.map((cat) => {
+      const due = str(fd, `due_${cat}`);
+      if (!due || !/^\d{4}-\d{2}-\d{2}$/.test(due)) throw new FormError(`Set a due date for ${CATEGORY_LABEL[cat]}.`);
+      const assigneeId = int(fd, `assignee_${cat}`);
+      if (!assigneeId) throw new FormError(`Choose who does ${CATEGORY_LABEL[cat]}.`);
+      return { cat, title: (str(fd, `title_${cat}`) ?? `${CATEGORY_LABEL[cat]} – ${client.name}`).slice(0, 200), due, assigneeId };
+    });
+    const people = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .where(and(inArray(schema.users.id, plan.map((p) => p.assigneeId)), eq(schema.users.status, "ACTIVE")));
+    if (plan.some((p) => !people.some((u) => u.id === p.assigneeId))) throw new FormError("One of the people picked isn't an active user.");
+
+    for (const p of plan) {
+      const [t] = await db
+        .insert(schema.tasks)
+        .values({ title: p.title, category: p.cat, clientId, priority: "HIGH", dueDate: p.due, createdById: me.id })
+        .returning();
+      await db.insert(schema.taskAssignees).values({ taskId: t.id, userId: p.assigneeId });
+      await logTaskActivity(t.id, me.id, "CREATED", { from: "Target Schedule" });
+      if (p.assigneeId !== me.id) await notifyTaskAssigned(t.id, [p.assigneeId], me.name, me.id);
+    }
+    revalidatePath("/reports/target-schedule");
+    return { ok: `Created ${plan.length} BD task${plan.length === 1 ? "" : "s"} for ${client.name}.` };
+  } catch (e) {
+    return toFormError(e);
   }
-  revalidatePath("/reports/target-schedule");
 }
 
 export type TargetImportResult = { error?: string; clients?: number; created?: number; updated?: number; clientsCreated?: string[]; unmatched?: string[]; batch?: string };

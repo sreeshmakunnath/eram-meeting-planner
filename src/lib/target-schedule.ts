@@ -16,7 +16,7 @@ export type Cell = { taskId: number; due: string | null; status: TaskStatus; own
 export async function targetScheduleRows(me: SessionUser, batch?: string) {
   const today = todayRiyadh();
   const clients = await db
-    .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, batch: schema.clients.targetBatch, notes: schema.clients.notes, bdStage: schema.clients.bdStage })
+    .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, batch: schema.clients.targetBatch, notes: schema.clients.notes, bdStage: schema.clients.bdStage, accountOwnerId: schema.clients.accountOwnerId })
     .from(schema.clients)
     .where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
     .orderBy(asc(schema.clients.targetBatch), asc(schema.clients.name));
@@ -31,6 +31,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
             inArray(schema.tasks.category, BD_CATEGORIES),
             ne(schema.tasks.status, "CANCELLED"),
             isNull(schema.tasks.sourceBriefId), // brief actions are tracked as tasks, not as BD schedule steps
+            isNull(schema.tasks.parentTaskId),
             taskVisibleTo(me),
           ),
         )

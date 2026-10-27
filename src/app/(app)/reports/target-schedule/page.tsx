@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { Empty, PageHeader } from "@/components/ui";
 import { createBdTasks, importTargetSchedule } from "@/lib/actions/target";
+import { canManageClient } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
+import { activeUsers } from "@/lib/queries";
 import { fmtPlainDate } from "@/lib/meetings";
-import { TASK_STATUS_LABEL } from "@/lib/tasks";
-import { batches, targetScheduleRows, type Cell } from "@/lib/target-schedule";
+import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
+import { batches, targetScheduleRows, type Cell, type TargetRow } from "@/lib/target-schedule";
+import { BdTasksDialog, type BdTaskDefault } from "./bd-tasks-dialog";
 import { TargetImportForm } from "./import-form";
 
 function Due({ c }: { c: Cell }) {
@@ -19,9 +22,30 @@ function Due({ c }: { c: Cell }) {
 const statusCls = (s: string | null) =>
   s === "COMPLETED" ? "text-emerald-700" : s === "ON_HOLD" ? "text-amber-700" : s === "NOT_STARTED" || !s ? "text-slate-500" : "text-brand-600";
 
+/** BD steps in schedule order, with default due dates spread a week apart from today. */
+const BD_STEPS = [
+  { category: "MARKET_RESEARCH", cell: "research", days: 7 },
+  { category: "MIR_REPORT", cell: "mir", days: 14 },
+  { category: "APPROACH", cell: "approach", days: 21 },
+  { category: "FOLLOW_UP", cell: "followUp", days: 28 },
+] as const;
+const inDays = (n: number) => new Date(Date.now() + 3 * 3600_000 + n * 86400_000).toISOString().slice(0, 10); // Riyadh date
+
+function missingBdTasks(r: TargetRow): BdTaskDefault[] {
+  return BD_STEPS.filter((s) => !r[s.cell]).map((s) => ({
+    category: s.category,
+    label: CATEGORY_LABEL[s.category],
+    title: `${CATEGORY_LABEL[s.category]} – ${r.name}`,
+    due: inDays(s.days),
+  }));
+}
+
 export default async function TargetSchedulePage({ searchParams }: { searchParams: { batch?: string } }) {
   const me = await requireUser();
-  const [rows, batchList] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches()]);
+  const [rows, batchList, users] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches(), activeUsers()]);
+  const people = users.map(({ id, fullName }) => ({ id, fullName }));
+  // Who may create BD tasks on each row (Admins of the client's units, the account owner)
+  const manageable = new Set((await Promise.all(rows.map(async (r) => ((await canManageClient(me, r)) ? r.id : null)))).filter((id) => id !== null));
   return (
     <>
       <PageHeader
@@ -95,10 +119,15 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
                   <td className={statusCls(r.approachStatus)}>{r.approachStatus ? TASK_STATUS_LABEL[r.approachStatus] : "—"}</td>
                   <td className="min-w-[10rem] text-xs text-slate-500">
                     {r.notes}
-                    {!r.hasTasks && (
-                      <form action={createBdTasks.bind(null, r.id)}>
-                        <button className="text-xs font-medium text-brand hover:underline">+ Create BD tasks</button>
-                      </form>
+                    {manageable.has(r.id) && missingBdTasks(r).length > 0 && (
+                      <BdTasksDialog
+                        action={createBdTasks.bind(null, r.id)}
+                        clientName={r.name}
+                        tasks={missingBdTasks(r)}
+                        people={people}
+                        defaultAssigneeId={r.accountOwnerId ?? me.id}
+                        partial={r.hasTasks}
+                      />
                     )}
                   </td>
                 </tr>
