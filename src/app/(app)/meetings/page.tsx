@@ -1,11 +1,9 @@
-import { asc, ne } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, Notice, PageHeader, Tabs } from "@/components/ui";
-import { db, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { isSuperAdmin, requireUser } from "@/lib/auth";
 import { listMeetings, type MeetingFilters } from "@/lib/meeting-queries";
 import { fmtDay, fmtPlainDate, fmtTime, PRIORITY_LABEL, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
-import { activeGroups, activeUsers } from "@/lib/queries";
+import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
 const priorityTone = { HIGH: "red", MEDIUM: "amber", LOW: "gray" } as const;
 
@@ -13,7 +11,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
   const me = await requireUser();
   const [rows, clients, users, groups] = await Promise.all([
     listMeetings(me, searchParams),
-    db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),
+    clientOptions(me),
     activeUsers(),
     activeGroups(),
   ]);
@@ -24,13 +22,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Mee
     <>
       <PageHeader
         title="Client Meeting Planner"
-        subtitle={`${rows.length} meeting${rows.length === 1 ? "" : "s"}${me.role === "ADMIN" ? "" : " you organise, attend or own the next action of"}`}
+        subtitle={`${rows.length} meeting${rows.length === 1 ? "" : "s"}${me.role === "SUPER_ADMIN" ? "" : " in your business units or that you organise, attend or own an action of"}`}
         actions={
           <>
             <a href={`/api/meetings/export?${qs}`} className="btn-secondary">
               Export Excel
             </a>
-            {me.role === "ADMIN" && (
+            {isSuperAdmin(me) && (
               <Link href="/meetings/import" className="btn-secondary">
                 Import Excel
               </Link>

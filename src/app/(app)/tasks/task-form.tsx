@@ -1,4 +1,4 @@
-import { and, asc, desc, isNotNull, ne } from "drizzle-orm";
+import { and, desc, isNotNull } from "drizzle-orm";
 import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { CheckboxList } from "@/components/checkbox-list";
@@ -8,7 +8,7 @@ import type { Task } from "@/db/schema";
 import { saveTask } from "@/lib/actions/tasks";
 import type { SessionUser } from "@/lib/auth";
 import { fmtPlainDate, riyadhParts, visibleTo } from "@/lib/meetings";
-import { activeGroups, activeUsers } from "@/lib/queries";
+import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
 
 export async function TaskForm({
@@ -27,7 +27,7 @@ export async function TaskForm({
   const [users, groups, clients, meetings] = await Promise.all([
     activeUsers(),
     activeGroups(),
-    db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),
+    clientOptions(me, task?.clientId ?? defaults.clientId),
     db
       .select({ id: schema.meetings.id, title: schema.meetings.title, startAt: schema.meetings.startAt })
       .from(schema.meetings)

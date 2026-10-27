@@ -38,7 +38,7 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
     <>
       <PageHeader
         title="Client status"
-        subtitle={`Where every client stands — ${all.length} clients${me.role === "ADMIN" ? "" : ", based on meetings you can see"}.`}
+        subtitle={`Where every client stands — ${all.length} clients${me.role === "SUPER_ADMIN" ? "" : ", based on meetings you can see"}.`}
         actions={
           <a href={`/api/reports/client-status?${qs}`} className="btn-secondary">
             Export Excel
@@ -88,7 +88,7 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => {
-                const canStage = me.role === "ADMIN" || r.ownerId === me.id;
+                const canStage = me.role !== "USER" || r.ownerId === me.id; // checked again on save
                 return (
                   <tr key={r.id} className="hover:bg-slate-50">
                     <td className="min-w-[11rem]">

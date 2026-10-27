@@ -9,7 +9,7 @@ import { BD_STAGE_LABELS, BD_STAGES, INDUSTRIES } from "@/lib/queries";
 /** Empty client import sheet with dropdowns for the fixed lists. Admins only. */
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (session?.user?.role !== "ADMIN") return new Response("Admins only", { status: 403 });
+  if (session?.user?.role !== "ADMIN" && session?.user?.role !== "SUPER_ADMIN") return new Response("Admins only", { status: 403 });
 
   const [bus, users] = await Promise.all([
     db.select({ name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)).orderBy(asc(schema.businessUnits.name)),

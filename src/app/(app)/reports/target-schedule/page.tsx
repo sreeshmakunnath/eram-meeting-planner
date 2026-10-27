@@ -33,7 +33,7 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
           </a>
         }
       />
-      {me.role === "ADMIN" && <TargetImportForm action={importTargetSchedule} />}
+      {me.role === "SUPER_ADMIN" && <TargetImportForm action={importTargetSchedule} />}
       <div className="mb-3 flex flex-wrap gap-1.5">
         {[undefined, ...batchList].map((b) => (
           <Link

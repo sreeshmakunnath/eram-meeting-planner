@@ -4,7 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { logActivity, riyadh } from "@/lib/meetings";
 import { cleanClientName, looksLike } from "@/lib/client-names";
 import { asDate, asTime, norm, splitNames, text } from "@/lib/xl-read";
@@ -40,7 +40,7 @@ const HEADERS: Record<string, string[]> = {
 
 /** Imports the existing "Client Meeting Planner" Excel sheet. Safe to run twice: identical rows are skipped. */
 export async function importPlanner(_: ImportResult | undefined, fd: FormData): Promise<ImportResult> {
-  const admin = await requireAdmin();
+  const admin = await requireSuperAdmin();
   const file = fd.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose an .xlsx file." };
   if (file.size > 5 * 1024 * 1024) return { error: "File is larger than 5 MB." };

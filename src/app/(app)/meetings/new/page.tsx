@@ -6,9 +6,9 @@ import { MeetingForm } from "../meeting-form";
 
 export default async function NewMeetingPage({ searchParams }: { searchParams: { date?: string; client?: string } }) {
   const me = await requireUser();
-  const options = await meetingFormOptions();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.date ?? "") ? searchParams.date : "";
   const clientId = Number(searchParams.client) || null;
+  const options = await meetingFormOptions(me);
   return (
     <>
       <PageHeader title="New meeting" subtitle="Same fields as the Client Meeting Planner sheet." />

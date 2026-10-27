@@ -5,24 +5,27 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth";
+import { canManageUser, mergeBuIds, userBuIds } from "@/lib/access";
+import { isSuperAdmin, requireAdmin, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { notify } from "@/lib/notifications";
 import { hashPassword, passwordProblem } from "@/lib/password";
 import { sendResetEmail, sendWelcomeEmail } from "./auth";
 
-function readUser(fd: FormData) {
+function readUser(fd: FormData, actor: SessionUser) {
   const username = req(fd, "username", "Username").toLowerCase();
   if (!/^[a-z0-9._-]{3,50}$/.test(username))
     throw new FormError("Username: 3–50 characters, lowercase letters, numbers, dot, dash or underscore, no spaces.");
   const email = req(fd, "email", "Email ID").toLowerCase();
   if (!isEmail(email)) throw new FormError("Enter a valid email ID.");
-  const role = str(fd, "role") === "ADMIN" ? ("ADMIN" as const) : ("USER" as const);
+  const picked = str(fd, "role");
+  // Only a Super Admin can create another Super Admin.
+  const role = picked === "SUPER_ADMIN" && isSuperAdmin(actor) ? ("SUPER_ADMIN" as const) : picked === "ADMIN" ? ("ADMIN" as const) : ("USER" as const);
   const branchId = int(fd, "branchId");
   if (!branchId) throw new FormError("Branch is required.");
   const businessUnitId = int(fd, "businessUnitId");
-  if (!businessUnitId) throw new FormError("Business unit is required.");
+  if (!businessUnitId) throw new FormError("Primary business unit is required.");
   const mobile = str(fd, "mobile");
   if (mobile && !/^\+?[0-9 ]{7,20}$/.test(mobile)) throw new FormError("Mobile number should be digits, e.g. +966 5X XXX XXXX.");
   return {
@@ -37,6 +40,24 @@ function readUser(fd: FormData) {
     mobile,
     managerId: int(fd, "managerId"),
   };
+}
+
+/**
+ * The business units the user can access: the ticked ones plus the primary unit. BU Admins can only grant or
+ * remove their own units; the user's other units are kept.
+ */
+async function readBusinessUnits(fd: FormData, actor: SessionUser, primary: number, userId: number | null) {
+  const existing = userId ? await userBuIds(userId) : [];
+  const keepsPrimary = !isSuperAdmin(actor) && !actor.buIds.includes(primary) && existing.includes(primary);
+  if (!isSuperAdmin(actor) && !actor.buIds.includes(primary) && !keepsPrimary) throw new FormError("Primary business unit must be one of your business units.");
+  const { error, ids } = mergeBuIds(actor, [...new Set([...ints(fd, "businessUnitIds"), ...(keepsPrimary ? [] : [primary])])], existing, "user");
+  if (error) throw new FormError(error);
+  return [...new Set([...ids, primary])];
+}
+
+async function setBusinessUnits(userId: number, ids: number[]) {
+  await db.delete(schema.userBusinessUnits).where(eq(schema.userBusinessUnits.userId, userId));
+  await db.insert(schema.userBusinessUnits).values(ids.map((businessUnitId) => ({ userId, businessUnitId })));
 }
 
 /** Optional password typed by the Admin. Returns null when left blank. */
@@ -88,7 +109,8 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
   let passwordSet = false;
   try {
     const admin = await requireAdmin();
-    const data = readUser(fd);
+    const data = readUser(fd, admin);
+    const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, null);
     const password = readPassword(fd);
     passwordSet = !!password;
     const [user] = await db
@@ -96,10 +118,11 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
       .values({ ...data, passwordHash: password ? await hashPassword(password) : null, createdById: admin.id, updatedById: admin.id })
       .returning();
     id = user.id;
+    await setBusinessUnits(user.id, buIds);
     await syncMemberships(user.id, user.email, user.fullName, ints(fd, "groupIds"), admin.id);
     if (password) await sendAccountReadyEmail(user);
     else await sendWelcomeEmail(user);
-    await audit(admin.id, "USER_CREATED", "user", user.id, { username: user.username, role: user.role, passwordSetByAdmin: !!password });
+    await audit(admin.id, "USER_CREATED", "user", user.id, { username: user.username, role: user.role, businessUnits: buIds, passwordSetByAdmin: !!password });
   } catch (e) {
     return toFormError(e);
   }
@@ -112,13 +135,17 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     const admin = await requireAdmin();
     const id = int(fd, "id");
     if (!id) throw new FormError("Missing user.");
-    const data = readUser(fd);
+    if (!(await canManageUser(admin, id))) throw new FormError("You can only manage users in your business units.");
+    const data = readUser(fd, admin);
     const password = readPassword(fd);
     const [before] = await db.select().from(schema.users).where(eq(schema.users.id, id));
     if (!before) throw new FormError("User not found.");
-    if (id === admin.id && data.role !== "ADMIN") throw new FormError("You can't remove your own Admin role.");
+    if (id === admin.id && data.role !== admin.role) throw new FormError("You can't change your own role.");
+    const buBefore = await userBuIds(id);
+    const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, id);
     if (data.managerId === id) throw new FormError("A user can't be their own reporting manager.");
     await db.update(schema.users).set({ ...data, updatedById: admin.id }).where(eq(schema.users.id, id));
+    await setBusinessUnits(id, buIds);
     if (password) {
       // A new password also clears any lockout so the user can sign in with it right away.
       await db.update(schema.users).set({ passwordHash: await hashPassword(password), failedLogins: 0, lockedUntil: null }).where(eq(schema.users.id, id));
@@ -126,6 +153,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     }
     const groups = await syncMemberships(id, data.email, data.fullName, ints(fd, "groupIds"), admin.id);
     const changed = Object.keys(data).filter((k) => String(before[k as keyof typeof before] ?? "") !== String(data[k as keyof typeof data] ?? ""));
+    if ([...buBefore].sort().join() !== [...buIds].sort().join()) changed.push("businessUnits");
     await audit(admin.id, "USER_UPDATED", "user", id, { changed, groupsAdded: groups.added, groupsRemoved: groups.removed });
     revalidatePath("/admin/users");
     return { ok: password ? "User saved and password changed." : "User saved." };
@@ -136,15 +164,16 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
 
 export async function setUserStatus(id: number, status: "ACTIVE" | "INACTIVE") {
   const admin = await requireAdmin();
+  if (!(await canManageUser(admin, id))) redirect("/admin/users?msg=denied");
   if (id === admin.id && status === "INACTIVE") redirect(`/admin/users/${id}?msg=self`);
   if (status === "INACTIVE") {
-    // Keep at least one active admin.
+    // Keep at least one active Super Admin.
     const [target] = await db.select().from(schema.users).where(eq(schema.users.id, id));
-    if (target?.role === "ADMIN") {
+    if (target?.role === "SUPER_ADMIN") {
       const others = await db
         .select({ id: schema.users.id })
         .from(schema.users)
-        .where(and(eq(schema.users.role, "ADMIN"), eq(schema.users.status, "ACTIVE"), ne(schema.users.id, id)));
+        .where(and(eq(schema.users.role, "SUPER_ADMIN"), eq(schema.users.status, "ACTIVE"), ne(schema.users.id, id)));
       if (!others.length) redirect(`/admin/users/${id}?msg=lastadmin`);
     }
   }
@@ -156,6 +185,7 @@ export async function setUserStatus(id: number, status: "ACTIVE" | "INACTIVE") {
 
 export async function unlockUser(id: number) {
   const admin = await requireAdmin();
+  if (!(await canManageUser(admin, id))) redirect("/admin/users?msg=denied");
   await db.update(schema.users).set({ failedLogins: 0, lockedUntil: null }).where(eq(schema.users.id, id));
   await audit(admin.id, "USER_UNLOCKED", "user", id);
   redirect(`/admin/users/${id}?msg=unlocked`);
@@ -163,6 +193,7 @@ export async function unlockUser(id: number) {
 
 export async function sendPasswordLink(id: number) {
   const admin = await requireAdmin();
+  if (!(await canManageUser(admin, id))) redirect("/admin/users?msg=denied");
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
   if (user) {
     if (user.passwordHash) await sendResetEmail(user);

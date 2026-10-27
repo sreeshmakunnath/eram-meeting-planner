@@ -1,16 +1,14 @@
-import { asc, ne } from "drizzle-orm";
-import { db, schema } from "@/db";
-import type { SessionUser } from "@/lib/auth";
+import { isAdmin, type SessionUser } from "@/lib/auth";
 import type { TaskFilters } from "@/lib/task-queries";
 import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
-import { activeGroups, activeUsers } from "@/lib/queries";
+import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
 /** Shared filter bar for list / board / timeline. */
 export async function TaskFilterBar({ me, f, showBucket = true }: { me: SessionUser; f: TaskFilters; showBucket?: boolean }) {
   const [users, groups, clients] = await Promise.all([
     activeUsers(),
     activeGroups(),
-    db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),
+    clientOptions(me),
   ]);
   return (
     <form className="card mb-4 grid gap-3 p-3 sm:grid-cols-3 lg:grid-cols-8">
@@ -18,7 +16,7 @@ export async function TaskFilterBar({ me, f, showBucket = true }: { me: SessionU
       <select name="scope" defaultValue={f.scope ?? "mine"} className="input">
         <option value="mine">Assigned to me</option>
         <option value="created">Created by me</option>
-        <option value="all">{me.role === "ADMIN" ? "Everyone" : "All I can see"}</option>
+        <option value="all">{me.role === "SUPER_ADMIN" ? "Everyone" : isAdmin(me) ? "Everyone in my business units" : "All I can see"}</option>
       </select>
       <input name="q" defaultValue={f.q} placeholder="Search tasks" className="input lg:col-span-2" />
       <select name="category" defaultValue={f.category ?? ""} className="input">

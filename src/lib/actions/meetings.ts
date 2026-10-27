@@ -1,11 +1,12 @@
 "use server";
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, inArray, like, not, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { canSeeClient, contactVisibleTo, mergeBuIds } from "@/lib/access";
+import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { assertClientName } from "@/lib/client-names";
 import { notify } from "@/lib/notifications";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
@@ -175,6 +176,23 @@ export async function notifyMeeting(
   }
 }
 
+/** Picked contacts the person can see, plus contacts already on the meeting that are private to someone else (kept as they were). */
+async function meetingContactIds(me: SessionUser, picked: number[], meetingId?: number) {
+  const cc = schema.clientContacts;
+  const visible = contactVisibleTo(me);
+  const allowed = picked.length ? (await db.select({ id: cc.id }).from(cc).where(and(inArray(cc.id, picked), visible))).map((r) => r.id) : [];
+  const hidden = meetingId
+    ? (
+        await db
+          .select({ id: cc.id })
+          .from(schema.meetingContacts)
+          .innerJoin(cc, eq(schema.meetingContacts.contactId, cc.id))
+          .where(and(eq(schema.meetingContacts.meetingId, meetingId), not(visible)))
+      ).map((r) => r.id)
+    : [];
+  return [...new Set([...allowed, ...hidden])];
+}
+
 export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionState> {
   let id: number | null;
   try {
@@ -182,8 +200,12 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     id = int(fd, "id");
     const before = id ? await db.query.meetings.findFirst({ where: eq(schema.meetings.id, id), with: { attendees: true } }) : undefined;
     if (id && !before) throw new FormError("Meeting not found.");
-    if (before && !canEditMeeting(me, before)) throw new FormError("Only the organiser or an Admin can edit this meeting.");
+    if (before && !(await canEditMeeting(me, before))) throw new FormError("Only the organiser or an Admin can edit this meeting.");
     const externalBefore = before ? await externalAttendees(before.id) : [];
+
+    // Business units: people only add or remove their own; units outside their access stay as they were.
+    const existingBus = before ? (await db.select().from(schema.meetingBusinessUnits).where(eq(schema.meetingBusinessUnits.meetingId, before.id))).map((b) => b.businessUnitId) : [];
+    const buIds = mergeBuIds(me, ints(fd, "businessUnitIds"), existingBus, "meeting").ids; // optional on meetings
 
     // Client: existing, or quick-add a new one (pending review for Users).
     let clientId: number | null = null;
@@ -193,11 +215,21 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
       const country = req(fd, "newClientCountry", "New client country");
       const [c] = await db
         .insert(schema.clients)
-        .values({ name, country, type: "PROSPECT", status: me.role === "ADMIN" ? "ACTIVE" : "PENDING_REVIEW", createdById: me.id })
+        .values({ name, country, type: "PROSPECT", status: isAdmin(me) ? "ACTIVE" : "PENDING_REVIEW", createdById: me.id })
         .returning();
       clientId = c.id;
+      // The new client belongs to the meeting's business units (or the person's primary unit).
+      const clientBus = isSuperAdmin(me) ? buIds : buIds.filter((b) => me.buIds.includes(b));
+      if (!clientBus.length) {
+        const [u] = await db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, me.id));
+        if (u) clientBus.push(u.bu);
+      }
+      if (clientBus.length) await db.insert(schema.clientBusinessUnits).values(clientBus.map((businessUnitId) => ({ clientId: c.id, businessUnitId })));
       await audit(me.id, "CLIENT_CREATED", "client", c.id, { name, from: "meeting form" });
-    } else if (clientField) clientId = Number(clientField);
+    } else if (clientField) {
+      clientId = Number(clientField);
+      if (clientId !== before?.clientId && !(await canSeeClient(me, clientId))) throw new FormError("You don't have access to that client.");
+    }
 
     const type = pick(MEETING_TYPES, str(fd, "type"), "CLIENT_MEETING");
     let status = pick(MEETING_STATUSES, str(fd, "status"), "TO_BE_SCHEDULED");
@@ -276,8 +308,8 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
       if (rows.length) await db.insert(table).values(rows as never);
     };
     await replace(schema.meetingGroups, schema.meetingGroups.meetingId, groupIds.map((groupId) => ({ meetingId, groupId })));
-    await replace(schema.meetingContacts, schema.meetingContacts.meetingId, ints(fd, "contactIds").map((contactId) => ({ meetingId, contactId })));
-    await replace(schema.meetingBusinessUnits, schema.meetingBusinessUnits.meetingId, ints(fd, "businessUnitIds").map((businessUnitId) => ({ meetingId, businessUnitId })));
+    await replace(schema.meetingContacts, schema.meetingContacts.meetingId, (await meetingContactIds(me, ints(fd, "contactIds"), before?.id)).map((contactId) => ({ meetingId, contactId })));
+    await replace(schema.meetingBusinessUnits, schema.meetingBusinessUnits.meetingId, buIds.map((businessUnitId) => ({ meetingId, businessUnitId })));
     await replace(schema.meetingActionOwners, schema.meetingActionOwners.meetingId, ints(fd, "ownerIds").map((userId) => ({ meetingId, userId })));
 
     // Activity log
@@ -321,7 +353,7 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
 
 async function loadEditable(me: SessionUser, id: number) {
   const m = await db.query.meetings.findFirst({ where: eq(schema.meetings.id, id), with: { attendees: true } });
-  if (!m || !canEditMeeting(me, m)) redirect(`/meetings/${id}?msg=denied`);
+  if (!m || !(await canEditMeeting(me, m))) redirect(`/meetings/${id}?msg=denied`);
   return m;
 }
 
@@ -342,7 +374,7 @@ export async function setMeetingStatus(id: number, status: MeetingStatus) {
 
 export async function deleteMeeting(id: number) {
   const me = await requireUser();
-  if (me.role !== "ADMIN") redirect(`/meetings/${id}?msg=denied`);
+  if (!isAdmin(me)) redirect(`/meetings/${id}?msg=denied`);
   const m = await loadEditable(me, id);
   if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled", await externalAttendees(id), me.id);
   await db.update(schema.meetingBriefs).set({ followUpMeetingId: null }).where(eq(schema.meetingBriefs.followUpMeetingId, id));

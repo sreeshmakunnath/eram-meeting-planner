@@ -81,7 +81,7 @@ export default async function TaskReportPage() {
     <>
       <PageHeader
         title="Task report"
-        subtitle={me.role === "ADMIN" ? "Workload and progress across the organisation." : "Tasks you can see."}
+        subtitle={me.role === "SUPER_ADMIN" ? "Workload and progress across the organisation." : me.role === "ADMIN" ? "Workload and progress in your business units." : "Tasks you can see."}
         actions={
           <a href="/api/tasks/export?scope=all&bucket=any" className="btn-secondary">
             Export all tasks

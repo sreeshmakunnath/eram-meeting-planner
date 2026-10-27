@@ -1,4 +1,4 @@
-import { and, asc, eq, exists, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
@@ -6,7 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { meetingsBetween, toBeScheduled } from "@/lib/meeting-queries";
 import { tasksDueBetween } from "@/lib/task-queries";
 import { fmtPlainDate, fmtTime, riyadh, riyadhParts, STATUS_CHIP, STATUS_LABEL, todayRiyadh } from "@/lib/meetings";
-import { activeGroups, activeUsers } from "@/lib/queries";
+import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
 type Search = { month?: string; view?: string; user?: string; group?: string; client?: string; tasks?: string };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -60,7 +60,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
     toBeScheduled(me, filter),
     activeUsers(),
     activeGroups(),
-    db.select({ id: schema.clients.id, name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),
+    clientOptions(me),
     showTasks && !searchParams.user && !searchParams.group ? tasksDueBetween(me, gridStart, gridEnd, taskFilter) : Promise.resolve([]),
   ]);
   const tasksByDay = new Map<string, typeof dueTasks>();
@@ -123,7 +123,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
         <input type="hidden" name="month" value={ym} />
         <input type="hidden" name="view" value={view} />
         <select name="user" defaultValue={searchParams.user ?? ""} className="input max-w-[14rem]">
-          <option value="">{me.role === "ADMIN" ? "Everyone" : "All my meetings"}</option>
+          <option value="">{me.role === "SUPER_ADMIN" ? "Everyone" : "All I can see"}</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.id === me.id ? `Me (${u.fullName})` : u.fullName}

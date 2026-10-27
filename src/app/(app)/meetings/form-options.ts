@@ -1,5 +1,7 @@
-import { asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, or } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { allowedBuIds, clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import type { SessionUser } from "@/lib/auth";
 import { activeBusinessUnits, activeGroups, activeUsers } from "@/lib/queries";
 
 export type ClientOption = {
@@ -12,17 +14,22 @@ export type ClientOption = {
 };
 export type MeetingFormOptions = Awaited<ReturnType<typeof meetingFormOptions>>;
 
-/** Everything the meeting form's dropdowns need, in one round of queries. */
-export async function meetingFormOptions() {
+/**
+ * Everything the meeting form's dropdowns need, in one round of queries: clients the user can see (plus the
+ * meeting's current client) and the business units they may tick.
+ */
+export async function meetingFormOptions(me: SessionUser, currentClientId?: number | null) {
+  const visible = clientVisibleTo(me);
   const [clients, contacts, cbus, users, groups, bus] = await Promise.all([
     db
       .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, accountGroupId: schema.clients.accountGroupId })
       .from(schema.clients)
-      .where(ne(schema.clients.status, "INACTIVE"))
+      .where(and(ne(schema.clients.status, "INACTIVE"), currentClientId && visible ? or(visible, eq(schema.clients.id, currentClientId)) : visible))
       .orderBy(asc(schema.clients.name)),
     db
       .select({ id: schema.clientContacts.id, clientId: schema.clientContacts.clientId, name: schema.clientContacts.name, designation: schema.clientContacts.designation, email: schema.clientContacts.email })
       .from(schema.clientContacts)
+      .where(contactVisibleTo(me))
       .orderBy(asc(schema.clientContacts.name)),
     db.select().from(schema.clientBusinessUnits),
     activeUsers(),
@@ -37,7 +44,8 @@ export async function meetingFormOptions() {
     buIds: cbus.filter((b) => b.clientId === c.id).map((b) => b.businessUnitId),
     contacts: contacts.filter((x) => x.clientId === c.id).map(({ id, name, designation, email }) => ({ id, name, designation, hasEmail: !!email?.trim() })),
   }));
-  return { clients: clientOptions, users, groups, bus };
+  const allowed = allowedBuIds(me, bus.map((b) => b.id));
+  return { clients: clientOptions, users, groups, bus: bus.filter((b) => allowed.includes(b.id)) };
 }
 
 export async function meetingSelections(id: number) {

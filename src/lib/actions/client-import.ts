@@ -4,7 +4,8 @@ import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth";
+import { allowedBuIds, clientVisibleTo } from "@/lib/access";
+import { isSuperAdmin, requireAdmin } from "@/lib/auth";
 import { CLIENT_IMPORT_COLUMNS, type ClientField } from "@/lib/client-import-columns";
 import { cleanClientName, looksLike } from "@/lib/client-names";
 import { isEmail } from "@/lib/form";
@@ -99,11 +100,17 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
   }
   if (!ws) return { error: 'No "Client" column found in the first 10 rows. Use the template, or name the column "Client".' };
 
-  const [existing, users, bus] = await Promise.all([
+  const [existing, users, allBus, visible, [me]] = await Promise.all([
     db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode }).from(schema.clients),
     db.select({ id: schema.users.id, email: schema.users.email, username: schema.users.username, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
     db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)),
+    isSuperAdmin(admin) ? null : db.select({ id: schema.clients.id }).from(schema.clients).where(clientVisibleTo(admin)),
+    db.select({ primaryBu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, admin.id)),
   ]);
+  // BU Admins: only their own business units, and only clients they can see.
+  const allowed = allowedBuIds(admin, allBus.map((b) => b.id));
+  const bus = allBus.filter((b) => allowed.includes(b.id));
+  const visibleIds = visible && new Set(visible.map((v) => v.id));
   const existingContacts = existing.length
     ? await db
         .select({ clientId: schema.clientContacts.clientId, name: schema.clientContacts.name, email: schema.clientContacts.email, isPrimary: schema.clientContacts.isPrimary })
@@ -139,6 +146,11 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
     let plan = plans.get(key);
     if (!plan) {
       const match = existing.find((e) => e.name.toLowerCase() === key);
+      if (match && visibleIds && !visibleIds.has(match.id)) {
+        skipped.push({ row: r, client: name, message: "This client belongs to another business unit, so it wasn't changed." });
+        rejected.add(key);
+        continue;
+      }
       if (!match) {
         const near = existing.find((e) => looksLike(e, name)) ?? [...plans.values()].find((p) => !p.existingId && looksLike(p, name));
         if (near && !allowSimilar) {
@@ -197,7 +209,8 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
     }
     for (const b of values.businessUnits.split(/[;,/\n]/).map((x) => x.trim()).filter(Boolean)) {
       const unit = bus.find((x) => norm(x.name) === norm(b));
-      if (!unit) warnings.push({ row: r, client: name, message: `Business unit "${b}" isn't in the master list, so it was left out.` });
+      if (!unit)
+        warnings.push({ row: r, client: name, message: `Business unit "${b}" isn't ${isSuperAdmin(admin) ? "in the master list" : "one of your business units"}, so it was left out.` });
       else if (!plan.buIds.includes(unit.id)) plan.buIds.push(unit.id);
     }
 
@@ -249,6 +262,8 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
         .values({ type: "PROSPECT", status: "ACTIVE", ...p.fields, name: p.name, country: p.fields.country!, createdById: admin.id })
         .returning({ id: schema.clients.id });
       id = c.id;
+      // A new client without a business unit gets the importing Admin's primary unit, so it doesn't vanish from view.
+      if (!p.buIds.length && me) p.buIds.push(me.primaryBu);
     }
     if (p.buIds.length)
       await db
@@ -256,7 +271,7 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
         .values(p.buIds.map((businessUnitId) => ({ clientId: id!, businessUnitId })))
         .onConflictDoNothing();
     if (p.contacts.length)
-      await db.insert(schema.clientContacts).values(p.contacts.map((c, i) => ({ ...c, clientId: id!, isPrimary: !p.hasPrimary && i === 0 })));
+      await db.insert(schema.clientContacts).values(p.contacts.map((c, i) => ({ ...c, clientId: id!, isPrimary: !p.hasPrimary && i === 0, ownerId: admin.id })));
   }
   await audit(admin.id, "CLIENTS_IMPORTED", "client", null, {
     file: file.name,

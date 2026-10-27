@@ -1,10 +1,10 @@
 import { PageHeader } from "@/components/ui";
 import { importPlanner } from "@/lib/actions/import";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { ImportForm } from "./import-form";
 
 export default async function ImportPage() {
-  await requireAdmin();
+  await requireSuperAdmin();
   return (
     <>
       <PageHeader title="Import Client Meeting Planner" subtitle="Upload the existing ERAM Holdings planner sheet (.xlsx)." />

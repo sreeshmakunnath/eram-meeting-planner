@@ -2,7 +2,8 @@ import { and, asc, eq, exists, gte, inArray, isNull, lt, ne, notInArray, or, sql
 import Link from "next/link";
 import { Notice, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { clientVisibleTo } from "@/lib/access";
+import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 import { meetingsBetween } from "@/lib/meeting-queries";
 import { listTasks } from "@/lib/task-queries";
@@ -27,19 +28,19 @@ const m = schema.meetings;
 
 export default async function Dashboard({ searchParams }: { searchParams: { denied?: string; tab?: string } }) {
   const me = await requireUser();
-  const isAdmin = me.role === "ADMIN";
-  const tab = isAdmin && searchParams.tab === "org" ? "org" : "mine";
+  const admin = isAdmin(me);
+  const tab = admin && searchParams.tab === "org" ? "org" : "mine";
 
   return (
     <>
-      <PageHeader title={`Welcome, ${me.name.split(" ")[0]}`} subtitle={isAdmin ? "Your work and the organisation overview." : "Your dashboard."} />
+      <PageHeader title={`Welcome, ${me.name.split(" ")[0]}`} subtitle={admin ? `Your work and the ${isSuperAdmin(me) ? "organisation" : "business unit"} overview.` : "Your dashboard."} />
       {searchParams.denied && <Notice tone="error">That page is for Admins only.</Notice>}
-      {isAdmin && (
+      {admin && (
         <Tabs
           active={tab === "org" ? "/?tab=org" : "/"}
           items={[
             { href: "/", label: "My work" },
-            { href: "/?tab=org", label: "Organisation overview" },
+            { href: "/?tab=org", label: isSuperAdmin(me) ? "Organisation overview" : "Business unit overview" },
           ]}
         />
       )}
@@ -173,13 +174,13 @@ async function MyWork({ me }: { me: SessionUser }) {
 async function OrgOverview({ me }: { me: SessionUser }) {
   const today = todayRiyadh();
   const [stages, org, [monthCount], [tbs], statusRows, orgOverdue] = await Promise.all([
-    db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).groupBy(schema.clients.bdStage),
-    orgStats(),
+    db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me))).groupBy(schema.clients.bdStage),
+    orgStats(me),
     db
       .select({ n: count })
       .from(m)
-      .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]))),
-    db.select({ n: count }).from(m).where(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"])),
+      .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]), visibleTo(me))),
+    db.select({ n: count }).from(m).where(and(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"]), visibleTo(me))),
     clientStatusRows(me),
     listTasks(me, { scope: "all", bucket: "overdue" }, 1000),
   ]);

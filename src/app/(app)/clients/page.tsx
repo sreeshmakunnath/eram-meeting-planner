@@ -1,16 +1,19 @@
-import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, labelize, PageHeader, statusTone } from "@/components/ui";
 import { db, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
 import { activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES } from "@/lib/queries";
 
-type Search = { q?: string; type?: string; stage?: string; owner?: string; status?: string; country?: string };
+type Search = { q?: string; type?: string; stage?: string; owner?: string; status?: string; country?: string; bu?: string };
 
 export default async function ClientsPage({ searchParams }: { searchParams: Search }) {
   const me = await requireUser();
   const { clients, users } = schema;
-  const where: SQL[] = [];
+  const visible = clientVisibleTo(me);
+  const where: SQL[] = visible ? [visible] : [];
+  if (searchParams.bu) where.push(sql`exists (select 1 from client_business_units cb where cb.client_id = ${clients.id} and cb.business_unit_id = ${Number(searchParams.bu)})`);
   if (searchParams.q) {
     const q = `%${searchParams.q}%`;
     where.push(or(ilike(clients.name, q), ilike(clients.shortCode, q), ilike(clients.city, q))!);
@@ -24,7 +27,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
   const status = searchParams.status ?? "ACTIVE";
   if (status === "ACTIVE" || status === "INACTIVE" || status === "PENDING_REVIEW") where.push(eq(clients.status, status));
 
-  const [rows, owners, [{ pending }]] = await Promise.all([
+  const [rows, owners, [{ pending }], bus] = await Promise.all([
     db
       .select({
         id: clients.id,
@@ -36,14 +39,20 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
         bdStage: clients.bdStage,
         status: clients.status,
         owner: users.fullName,
-        contacts: sql<number>`(select count(*) from client_contacts cc where cc.client_id = ${clients.id})`.mapWith(Number),
+        businessUnits: sql<string>`(select string_agg(b.name, ', ' order by b.name) from client_business_units cb join business_units b on b.id = cb.business_unit_id where cb.client_id = ${clients.id})`.mapWith(String),
+        contacts: sql<number>`(${db.select({ n: sql`count(*)` }).from(schema.clientContacts).where(and(eq(schema.clientContacts.clientId, clients.id), contactVisibleTo(me)))})`.mapWith(Number),
       })
       .from(clients)
       .leftJoin(users, eq(clients.accountOwnerId, users.id))
       .where(where.length ? and(...where) : undefined)
       .orderBy(asc(clients.name)),
     activeUsers(),
-    db.select({ pending: sql<number>`count(*)`.mapWith(Number) }).from(clients).where(eq(clients.status, "PENDING_REVIEW")),
+    db.select({ pending: sql<number>`count(*)`.mapWith(Number) }).from(clients).where(and(eq(clients.status, "PENDING_REVIEW"), visible)),
+    db
+      .select({ id: schema.businessUnits.id, name: schema.businessUnits.name })
+      .from(schema.businessUnits)
+      .where(isSuperAdmin(me) ? undefined : inArray(schema.businessUnits.id, me.buIds))
+      .orderBy(asc(schema.businessUnits.name)),
   ]);
 
   const csv = new URLSearchParams(searchParams as Record<string, string>).toString();
@@ -58,7 +67,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
             <a href={`/api/clients/export?${csv}`} className="btn-secondary">
               Export CSV
             </a>
-            {me.role === "ADMIN" && (
+            {isAdmin(me) && (
               <Link href="/clients/import" className="btn-secondary">
                 Import Excel
               </Link>
@@ -69,13 +78,21 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           </>
         }
       />
-      {me.role === "ADMIN" && pending > 0 && status !== "PENDING_REVIEW" && (
+      {isAdmin(me) && pending > 0 && status !== "PENDING_REVIEW" && (
         <Link href="/clients?status=PENDING_REVIEW" className="mb-4 block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 hover:bg-amber-100">
           {pending} client{pending === 1 ? "" : "s"} waiting for review →
         </Link>
       )}
-      <form className="card mb-4 grid gap-3 p-4 md:grid-cols-6">
+      <form className="card mb-4 grid gap-3 p-4 md:grid-cols-7">
         <input name="q" defaultValue={searchParams.q} placeholder="Search name, code, city" className="input md:col-span-2" />
+        <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
+          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
+          {bus.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
         <select name="type" defaultValue={searchParams.type ?? ""} className="input">
           <option value="">All types</option>
           {CLIENT_TYPES.map((t) => (
@@ -119,6 +136,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
               <tr>
                 <th>Client</th>
                 <th>Type</th>
+                <th>Business units</th>
                 <th>Location</th>
                 <th>BD stage</th>
                 <th>Account owner</th>
@@ -136,6 +154,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
                     {c.shortCode && <span className="ml-2 text-xs text-slate-500">{c.shortCode}</span>}
                   </td>
                   <td>{labelize(c.type)}</td>
+                  <td className="text-slate-600">{c.businessUnits || "—"}</td>
                   <td>{[c.city, c.country].filter(Boolean).join(", ")}</td>
                   <td>{c.bdStage ? BD_STAGE_LABELS[c.bdStage] : "—"}</td>
                   <td>{c.owner ?? "—"}</td>

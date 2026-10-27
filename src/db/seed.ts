@@ -44,13 +44,14 @@ async function main() {
       fullName: "System Administrator",
       username: "admin",
       email,
-      role: "ADMIN",
+      role: "SUPER_ADMIN",
       branchId: hq.id,
       businessUnitId: eng.id,
       passwordHash: await bcrypt.hash(password, 10),
     })
     .onConflictDoNothing();
   const [admin] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+  await db.insert(schema.userBusinessUnits).values({ userId: admin.id, businessUnitId: admin.businessUnitId }).onConflictDoNothing();
 
   for (const c of clientRows) {
     const [row] = await db

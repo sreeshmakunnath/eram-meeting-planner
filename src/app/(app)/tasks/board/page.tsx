@@ -26,7 +26,7 @@ export default async function BoardPage({ searchParams }: { searchParams: TaskFi
           dueDate: r.dueDate,
           overdue: r.overdue,
           priority: r.priority,
-          canMove: me.role === "ADMIN" || r.createdById === me.id || (r.assigneeIds ?? []).includes(me.id),
+          canMove: me.role !== "USER" || r.createdById === me.id || (r.assigneeIds ?? []).includes(me.id),
         }))}
       />
     </>

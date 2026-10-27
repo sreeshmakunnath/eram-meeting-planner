@@ -13,8 +13,8 @@ export default async function EditMeetingPage({ params, searchParams }: { params
   const id = Number(params.id);
   const [m] = Number.isInteger(id) ? await db.select().from(schema.meetings).where(eq(schema.meetings.id, id)) : [];
   if (!m) notFound();
-  if (!canEditMeeting(me, m)) redirect(`/meetings/${id}?msg=denied`);
-  const [options, sel] = await Promise.all([meetingFormOptions(), meetingSelections(id)]);
+  if (!(await canEditMeeting(me, m))) redirect(`/meetings/${id}?msg=denied`);
+  const [options, sel] = await Promise.all([meetingFormOptions(me, m.clientId), meetingSelections(id)]);
   const start = m.startAt ? riyadhParts(m.startAt) : null;
   const end = m.endAt ? riyadhParts(m.endAt) : null;
   return (

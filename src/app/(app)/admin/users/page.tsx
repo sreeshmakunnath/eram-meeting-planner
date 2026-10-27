@@ -1,23 +1,24 @@
-import { and, asc, eq, ilike, isNull, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
-import { Badge, Empty, fmtDateTime, PageHeader } from "@/components/ui";
+import { Badge, Empty, fmtDateTime, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
-import { requireAdmin } from "@/lib/auth";
+import { userInMyBus } from "@/lib/access";
+import { isSuperAdmin, requireAdmin } from "@/lib/auth";
 import { activeBusinessUnits } from "@/lib/queries";
 
-type Search = { q?: string; bu?: string; role?: string; status?: string };
+type Search = { q?: string; bu?: string; role?: string; status?: string; msg?: string };
 
 export default async function UsersPage({ searchParams }: { searchParams: Search }) {
-  await requireAdmin();
+  const me = await requireAdmin();
   const { users, businessUnits } = schema;
-  const where: SQL[] = [];
+  // BU Admins see the people in their business units
+  const where: SQL[] = isSuperAdmin(me) ? [] : [userInMyBus(me, users.id)];
   if (searchParams.q) {
     const q = `%${searchParams.q}%`;
     where.push(or(ilike(users.fullName, q), ilike(users.email, q), ilike(users.username, q), ilike(users.employeeId, q))!);
   }
-  if (searchParams.bu === "none") where.push(isNull(users.businessUnitId));
-  else if (searchParams.bu) where.push(eq(users.businessUnitId, Number(searchParams.bu)));
-  if (searchParams.role === "ADMIN" || searchParams.role === "USER") where.push(eq(users.role, searchParams.role));
+  if (searchParams.bu) where.push(sql`exists (select 1 from user_business_units ub where ub.user_id = ${users.id} and ub.business_unit_id = ${Number(searchParams.bu)})`);
+  if (searchParams.role === "SUPER_ADMIN" || searchParams.role === "ADMIN" || searchParams.role === "USER") where.push(eq(users.role, searchParams.role));
   if (searchParams.status === "ACTIVE" || searchParams.status === "INACTIVE") where.push(eq(users.status, searchParams.status));
 
   const [rows, buList] = await Promise.all([
@@ -33,13 +34,14 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
         lastLoginAt: users.lastLoginAt,
         lockedUntil: users.lockedUntil,
         businessUnit: businessUnits.name,
+        otherUnits: sql<string>`(select string_agg(b.name, ', ' order by b.name) from user_business_units ub join business_units b on b.id = ub.business_unit_id where ub.user_id = ${users.id} and ub.business_unit_id <> ${users.businessUnitId})`.mapWith(String),
         groupCount: sql<number>`(select count(*) from group_members gm where gm.user_id = ${users.id})`.mapWith(Number),
       })
       .from(users)
       .leftJoin(businessUnits, eq(users.businessUnitId, businessUnits.id))
       .where(where.length ? and(...where) : undefined)
       .orderBy(asc(users.fullName)),
-    activeBusinessUnits(),
+    activeBusinessUnits().then((list) => (isSuperAdmin(me) ? list : list.filter((b) => me.buIds.includes(b.id)))),
   ]);
 
   return (
@@ -53,19 +55,20 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
           </Link>
         }
       />
+      {searchParams.msg === "denied" && <Notice tone="error">You can only manage users in your business units.</Notice>}
       <form className="card mb-4 grid gap-3 p-4 md:grid-cols-5">
         <input name="q" defaultValue={searchParams.q} placeholder="Search name, email, username, employee ID" className="input md:col-span-2" />
         <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
-          <option value="">All business units</option>
+          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
           {buList.map((b) => (
             <option key={b.id} value={b.id}>
               {b.name}
             </option>
           ))}
-          <option value="none">No business unit</option>
         </select>
         <select name="role" defaultValue={searchParams.role ?? ""} className="input">
           <option value="">All roles</option>
+          <option value="SUPER_ADMIN">Super Admin</option>
           <option value="ADMIN">Admin</option>
           <option value="USER">User</option>
         </select>
@@ -87,7 +90,7 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
               <tr>
                 <th>Name</th>
                 <th>Email / username</th>
-                <th>Business unit</th>
+                <th>Business units</th>
                 <th>Role</th>
                 <th>Groups</th>
                 <th>Status</th>
@@ -107,8 +110,11 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
                     {u.email}
                     <div className="text-xs text-slate-500">{u.username}</div>
                   </td>
-                  <td>{u.businessUnit ?? <span className="text-slate-400">—</span>}</td>
-                  <td>{u.role === "ADMIN" ? <Badge tone="navy">Admin</Badge> : "User"}</td>
+                  <td>
+                    {u.businessUnit ?? <span className="text-slate-400">—</span>}
+                    {u.otherUnits && <div className="text-xs text-slate-500">+ {u.otherUnits}</div>}
+                  </td>
+                  <td>{u.role === "SUPER_ADMIN" ? <Badge tone="navy">Super Admin</Badge> : u.role === "ADMIN" ? <Badge tone="blue">Admin</Badge> : "User"}</td>
                   <td>{u.groupCount}</td>
                   <td>
                     <Badge tone={u.status === "ACTIVE" ? "green" : "gray"}>{u.status === "ACTIVE" ? "Active" : "Inactive"}</Badge>{" "}

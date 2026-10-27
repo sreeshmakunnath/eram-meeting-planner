@@ -2,12 +2,12 @@ import { and, desc, eq, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Empty, fmtDateTime, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 
 const PAGE = 50;
 
 export default async function AuditPage({ searchParams }: { searchParams: { entity?: string; action?: string; page?: string } }) {
-  await requireAdmin();
+  await requireSuperAdmin();
   const page = Math.max(1, Number(searchParams.page) || 1);
   const where: SQL[] = [];
   if (searchParams.entity) where.push(eq(schema.auditLogs.entity, searchParams.entity));

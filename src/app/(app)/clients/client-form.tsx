@@ -5,11 +5,16 @@ import { ClientNameField } from "@/components/client-name-field";
 import { Field, labelize } from "@/components/ui";
 import type { Client } from "@/db/schema";
 import { saveClient } from "@/lib/actions/clients";
-import type { SessionUser } from "@/lib/auth";
+import { allowedBuIds } from "@/lib/access";
+import { isAdmin, type SessionUser } from "@/lib/auth";
 import { activeBusinessUnits, activeGroups, activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES, INDUSTRIES } from "@/lib/queries";
 
 export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; client?: Client; buIds?: number[] }) {
-  const [users, groups, bus] = await Promise.all([activeUsers(), activeGroups(), activeBusinessUnits()]);
+  const [users, groups, allBus] = await Promise.all([activeUsers(), activeGroups(), activeBusinessUnits()]);
+  // Only the person's own business units can be ticked; other units already on the client are kept on save.
+  const allowed = allowedBuIds(me, allBus.map((b) => b.id));
+  const bus = allBus.filter((b) => allowed.includes(b.id));
+  const otherBus = allBus.filter((b) => buIds.includes(b.id) && !allowed.includes(b.id));
   return (
     <ActionForm action={saveClient} className="card p-6">
       {client && <input type="hidden" name="id" value={client.id} />}
@@ -89,7 +94,7 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
             ))}
           </select>
         </Field>
-        {me.role === "ADMIN" && (
+        {isAdmin(me) && (
           <Field label="Status">
             <select name="status" className="input" defaultValue={client?.status ?? "ACTIVE"}>
               <option value="ACTIVE">Active</option>
@@ -99,8 +104,12 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
           </Field>
         )}
         <div className="md:col-span-2">
-          <span className="label">Relevant business units</span>
-          <CheckboxList name="businessUnitIds" options={bus.map((b) => ({ id: b.id, label: b.name }))} selected={buIds} />
+          <span className="label">Relevant business units *</span>
+          <CheckboxList name="businessUnitIds" options={bus.map((b) => ({ id: b.id, label: b.name }))} selected={!client && bus.length === 1 ? [bus[0].id] : buIds} />
+          <p className="mt-1 text-xs text-slate-500">
+            Only people in these business units can see this client.
+            {otherBus.length > 0 && <> Also shared with {otherBus.map((b) => b.name).join(", ")} (kept as is).</>}
+          </p>
         </div>
         <div className="md:col-span-2">
           <Field label="Notes">
@@ -108,7 +117,7 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
           </Field>
         </div>
       </div>
-      {me.role !== "ADMIN" && !client && (
+      {!isAdmin(me) && !client && (
         <p className="mt-4 text-sm text-slate-500">New clients you add are saved as Pending review until an Admin approves them.</p>
       )}
       <div className="mt-6 flex justify-end gap-2">

@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { clientVisibleTo } from "./access";
 import type { SessionUser } from "./auth";
 import { todayRiyadh } from "./meetings";
 import { OPEN_STATUSES, taskVisibleTo, type TaskCategory, type TaskStatus } from "./tasks";
@@ -17,7 +18,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
   const clients = await db
     .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, batch: schema.clients.targetBatch, notes: schema.clients.notes, bdStage: schema.clients.bdStage })
     .from(schema.clients)
-    .where(and(ne(schema.clients.status, "INACTIVE"), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
+    .where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
     .orderBy(asc(schema.clients.targetBatch), asc(schema.clients.name));
   const ids = clients.map((c) => c.id);
   const tasks = ids.length

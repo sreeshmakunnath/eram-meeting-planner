@@ -2,14 +2,14 @@ import { and, asc, eq, ilike, inArray, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { GROUP_TYPES } from "@/lib/queries";
 
 export default async function GroupsPage({ searchParams }: { searchParams: { q?: string; type?: string; status?: string; msg?: string } }) {
   const me = await requireUser();
   const { groups, users } = schema;
   const where: SQL[] = [];
-  if (me.role !== "ADMIN") {
+  if (!isAdmin(me)) {
     const mine = await db.select({ id: schema.groupMembers.groupId }).from(schema.groupMembers).where(eq(schema.groupMembers.userId, me.id));
     where.push(inArray(groups.id, mine.length ? mine.map((m) => m.id) : [-1]));
   }
@@ -37,10 +37,10 @@ export default async function GroupsPage({ searchParams }: { searchParams: { q?:
   return (
     <>
       <PageHeader
-        title={me.role === "ADMIN" ? "Groups" : "My groups"}
-        subtitle={me.role === "ADMIN" ? "Teams, branches, projects and client account teams." : "Groups you belong to."}
+        title={isAdmin(me) ? "Groups" : "My groups"}
+        subtitle={isAdmin(me) ? "Teams, branches, projects and client account teams." : "Groups you belong to."}
         actions={
-          me.role === "ADMIN" && (
+          isAdmin(me) && (
             <Link href="/groups/new" className="btn-primary">
               Create group
             </Link>
@@ -67,7 +67,7 @@ export default async function GroupsPage({ searchParams }: { searchParams: { q?:
       </form>
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (
-          <Empty>{me.role === "ADMIN" ? "No groups yet. Create the first one." : "You're not in any group yet."}</Empty>
+          <Empty>{isAdmin(me) ? "No groups yet. Create the first one." : "You're not in any group yet."}</Empty>
         ) : (
           <table className="table">
             <thead>

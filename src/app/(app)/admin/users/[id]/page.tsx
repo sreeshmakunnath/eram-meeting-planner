@@ -1,8 +1,9 @@
 import { eq } from "drizzle-orm";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Badge, fmtDateTime, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { sendPasswordLink, setUserStatus, unlockUser, updateUser } from "@/lib/actions/users";
+import { canManageUser, userBuIds } from "@/lib/access";
 import { requireAdmin } from "@/lib/auth";
 import { UserForm } from "../user-form";
 
@@ -14,15 +15,16 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   unlocked: { tone: "ok", text: "Account unlocked." },
   linksent: { tone: "ok", text: "Password link emailed." },
   self: { tone: "error", text: "You can't deactivate your own account." },
-  lastadmin: { tone: "error", text: "This is the last active Admin. Make someone else Admin first." },
+  lastadmin: { tone: "error", text: "This is the last active Super Admin. Make someone else Super Admin first." },
 };
 
 export default async function EditUserPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
-  await requireAdmin();
+  const me = await requireAdmin();
   const id = Number(params.id);
   const [user] = Number.isInteger(id) ? await db.select().from(schema.users).where(eq(schema.users.id, id)) : [];
   if (!user) notFound();
-  const memberships = await db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, id));
+  if (!(await canManageUser(me, id))) redirect("/admin/users?msg=denied");
+  const [memberships, buIds] = await Promise.all([db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, id)), userBuIds(id)]);
   const locked = user.lockedUntil && user.lockedUntil > new Date();
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
 
@@ -55,7 +57,7 @@ export default async function EditUserPage({ params, searchParams }: { params: {
           </button>
         </form>
       </div>
-      <UserForm action={updateUser} user={user} groupIds={memberships.map((m) => m.groupId)} />
+      <UserForm me={me} action={updateUser} user={user} groupIds={memberships.map((m) => m.groupId)} buIds={buIds} />
     </>
   );
 }

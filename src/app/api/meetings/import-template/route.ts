@@ -7,7 +7,7 @@ import { buildImportTemplate, xlsxResponse } from "@/lib/excel";
 /** Empty Client Meeting Planner sheet for Meetings → Import Excel. Admins only. */
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (session?.user?.role !== "ADMIN") return new Response("Admins only", { status: 403 });
+  if (session?.user?.role !== "SUPER_ADMIN") return new Response("Super Admins only", { status: 403 });
 
   const [clients, users, bus] = await Promise.all([
     db.select({ name: schema.clients.name }).from(schema.clients).where(ne(schema.clients.status, "INACTIVE")).orderBy(asc(schema.clients.name)),

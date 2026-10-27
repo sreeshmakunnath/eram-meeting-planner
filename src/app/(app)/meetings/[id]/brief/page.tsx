@@ -63,7 +63,7 @@ export default async function BriefPage({ params, searchParams }: { params: { id
               <Link href={`/meetings-print/${id}`} target="_blank" className="btn-secondary">
                 Print / Save as PDF
               </Link>
-              {canEditMeeting(me, m) && (
+              {(await canEditMeeting(me, m)) && (
                 <form action={reopenBrief.bind(null, id)}>
                   <button className="btn-secondary">Reopen for edits</button>
                 </form>

@@ -1,11 +1,13 @@
 import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Empty, Field, fmtDateTime, labelize, Notice, PageHeader, statusTone, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
-import { addContact, approveClient, deleteContact, mergeClient, setPrimaryContact } from "@/lib/actions/clients";
-import { requireUser } from "@/lib/auth";
+import { addContact, approveClient, deleteContact, mergeClient, setContactShared, setPrimaryContact } from "@/lib/actions/clients";
+import { canManageClient, canSeeClient, clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 import { listMeetings } from "@/lib/meeting-queries";
 import { listTasks } from "@/lib/task-queries";
@@ -18,7 +20,7 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   approved: { tone: "ok", text: "Client approved and now available in dropdowns." },
   merged: { tone: "ok", text: "Duplicate merged into this client; its contacts were moved here." },
   mergefail: { tone: "error", text: "Pick a different client to merge into." },
-  denied: { tone: "error", text: "Only an Admin or the account owner can do that." },
+  denied: { tone: "error", text: "Only an Admin of this client's business units or the account owner can do that." },
 };
 
 export default async function ClientPage({ params, searchParams }: { params: { id: string }; searchParams: { tab?: string; msg?: string } }) {
@@ -31,23 +33,37 @@ export default async function ClientPage({ params, searchParams }: { params: { i
           accountOwner: { columns: { fullName: true } },
           accountGroup: { columns: { id: true, name: true } },
           createdBy: { columns: { fullName: true } },
-          contacts: { orderBy: (c, { desc, asc }) => [desc(c.isPrimary), asc(c.name)] },
           businessUnits: { with: { businessUnit: { columns: { name: true } } } },
         },
       })
     : undefined;
-  if (!client) notFound();
-  const editable = me.role === "ADMIN" || client.accountOwnerId === me.id;
+  if (!client || !(await canSeeClient(me, id))) notFound();
+  const editable = await canManageClient(me, client);
+  const owner = alias(schema.users, "owner");
+  const contacts = await db
+    .select({ contact: schema.clientContacts, owner: owner.fullName })
+    .from(schema.clientContacts)
+    .leftJoin(owner, eq(schema.clientContacts.ownerId, owner.id))
+    .where(and(eq(schema.clientContacts.clientId, id), contactVisibleTo(me)))
+    .orderBy(desc(schema.clientContacts.isPrimary), asc(schema.clientContacts.name))
+    // Same rule as canManageContact: the person who added it or the account owner; shared ones also client editors
+    .then((rows) =>
+      rows.map((r) => ({
+        ...r.contact,
+        owner: r.owner,
+        canManage: r.contact.ownerId === me.id || client.accountOwnerId === me.id || (r.contact.shared && editable),
+      })),
+    );
   const tab = searchParams.tab ?? "contacts";
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
   const base = `/clients/${id}`;
 
   const allClients =
-    client.status === "PENDING_REVIEW" && me.role === "ADMIN"
+    client.status === "PENDING_REVIEW" && isAdmin(me) && editable
       ? await db
           .select({ id: schema.clients.id, name: schema.clients.name })
           .from(schema.clients)
-          .where(ne(schema.clients.id, id))
+          .where(and(ne(schema.clients.id, id), clientVisibleTo(me)))
           .orderBy(asc(schema.clients.name))
       : [];
   const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
@@ -85,7 +101,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
       />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
 
-      {client.status === "PENDING_REVIEW" && me.role === "ADMIN" && (
+      {client.status === "PENDING_REVIEW" && isAdmin(me) && editable && (
         <div className="card mb-6 border-amber-200 bg-amber-50/50 p-4">
           <div className="mb-3 text-sm text-amber-900">
             Added by {client.createdBy?.fullName ?? "a user"} and waiting for review.
@@ -161,7 +177,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
           <Tabs
             active={`${base}?tab=${tab}`}
             items={[
-              { href: `${base}?tab=contacts`, label: `Contacts (${client.contacts.length})` },
+              { href: `${base}?tab=contacts`, label: `Contacts (${contacts.length})` },
               { href: `${base}?tab=meetings`, label: "Meetings" },
               { href: `${base}?tab=tasks`, label: "Tasks" },
               { href: `${base}?tab=activity`, label: "Activity" },
@@ -171,8 +187,8 @@ export default async function ClientPage({ params, searchParams }: { params: { i
           {tab === "contacts" && (
             <div className="space-y-6">
               <div className="card overflow-x-auto">
-                {client.contacts.length === 0 ? (
-                  <Empty>No contacts yet. Add the first one below.</Empty>
+                {contacts.length === 0 ? (
+                  <Empty>No contacts you can see yet. Add one below.</Empty>
                 ) : (
                   <table className="table">
                     <thead>
@@ -180,11 +196,12 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                         <th>Name</th>
                         <th>Email</th>
                         <th>Phone</th>
+                        <th>Visibility</th>
                         <th />
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
-                      {client.contacts.map((c) => (
+                      {contacts.map((c) => (
                         <tr key={c.id}>
                           <td>
                             {c.name} {c.isPrimary && <Badge tone="blue">Primary</Badge>}
@@ -192,13 +209,22 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                           </td>
                           <td>{c.email ? <a href={`mailto:${c.email}`} className="link">{c.email}</a> : "—"}</td>
                           <td>{c.phone ?? "—"}</td>
+                          <td className="whitespace-nowrap">
+                            {c.shared ? <Badge tone="green">Shared</Badge> : <Badge>Private</Badge>}
+                            {c.owner && <div className="text-xs text-slate-500">Added by {c.ownerId === me.id ? "you" : c.owner}</div>}
+                          </td>
                           <td className="whitespace-nowrap text-right">
                             {!c.isPrimary && (
                               <form action={setPrimaryContact.bind(null, id, c.id)} className="inline">
                                 <button className="text-xs text-brand hover:underline">Make primary</button>
                               </form>
                             )}
-                            {editable && (
+                            {c.canManage && (
+                              <form action={setContactShared.bind(null, id, c.id, !c.shared)} className="ml-3 inline">
+                                <button className="text-xs text-brand hover:underline">{c.shared ? "Make private" : "Share"}</button>
+                              </form>
+                            )}
+                            {c.canManage && (
                               <form action={deleteContact.bind(null, id, c.id)} className="ml-3 inline">
                                 <button className="text-xs text-red-600 hover:underline">Remove</button>
                               </form>
@@ -226,10 +252,15 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                     <input name="phone" className="input" maxLength={30} />
                   </Field>
                 </div>
-                <div className="mt-3 flex items-center justify-between">
-                  <label className="flex items-center gap-2 text-sm">
-                    <input type="checkbox" name="isPrimary" className="accent-brand" /> Primary contact
-                  </label>
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-4">
+                    <label className="flex items-center gap-2 text-sm">
+                      <input type="checkbox" name="isPrimary" className="accent-brand" /> Primary contact
+                    </label>
+                    <label className="flex items-center gap-2 text-sm" title="Private contacts are seen only by you and the client's account owner.">
+                      <input type="checkbox" name="shared" className="accent-brand" /> Share with everyone who can see this client
+                    </label>
+                  </div>
                   <SubmitButton>Add contact</SubmitButton>
                 </div>
               </ActionForm>

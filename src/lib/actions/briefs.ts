@@ -182,7 +182,7 @@ async function emailBrief(meetingId: number, actorId: number) {
 export async function reopenBrief(meetingId: number) {
   const me = await requireUser();
   const m = await db.query.meetings.findFirst({ where: eq(schema.meetings.id, meetingId) });
-  if (!m || !canEditMeeting(me, m)) redirect(`/meetings/${meetingId}/brief?msg=denied`);
+  if (!m || !(await canEditMeeting(me, m))) redirect(`/meetings/${meetingId}/brief?msg=denied`);
   const [b] = await db.select().from(schema.meetingBriefs).where(eq(schema.meetingBriefs.meetingId, meetingId));
   if (b) {
     await db.update(schema.meetingBriefs).set({ status: "DRAFT", version: b.version + 1 }).where(eq(schema.meetingBriefs.id, b.id));

@@ -3,7 +3,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { addMaster, renameMaster, toggleMaster } from "@/lib/actions/masters";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 
 type Row = { id: number; name: string; active: boolean; users: number };
 
@@ -36,7 +36,7 @@ function MasterCard({ kind, title, rows }: { kind: "branch" | "businessUnit"; ti
 }
 
 export default async function MastersPage() {
-  await requireAdmin();
+  await requireSuperAdmin();
   const [branches, bus] = await Promise.all([
     db
       .select({
@@ -52,7 +52,7 @@ export default async function MastersPage() {
         id: schema.businessUnits.id,
         name: schema.businessUnits.name,
         active: schema.businessUnits.active,
-        users: sql<number>`(select count(*) from users u where u.business_unit_id = ${schema.businessUnits.id})`.mapWith(Number),
+        users: sql<number>`(select count(*) from user_business_units ub where ub.business_unit_id = ${schema.businessUnits.id})`.mapWith(Number),
       })
       .from(schema.businessUnits)
       .orderBy(asc(schema.businessUnits.name)),

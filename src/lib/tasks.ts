@@ -1,8 +1,9 @@
 import { and, eq, exists, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { SessionUser } from "./auth";
+import { clientInMyBus, userInMyBus } from "./access";
+import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 import { appUrl, button, esc, sendMail } from "./mail";
-import { fmtPlainDate } from "./meetings";
+import { fmtPlainDate, meetingInMyBus } from "./meetings";
 import { notify } from "./notifications";
 
 export const TASK_STATUSES = ["NOT_STARTED", "STARTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"] as const;
@@ -38,10 +39,24 @@ export const CATEGORY_LABEL: Record<TaskCategory, string> = {
 
 const t = schema.tasks;
 
-/** Admins see every task. Users see tasks they created or are assigned to (directly or through a group they're in). */
-export function taskVisibleTo(me: SessionUser): SQL | undefined {
-  if (me.role === "ADMIN") return undefined;
+/** A task in one of the Admin's business units: its client or meeting is, or its creator or an assignee is a member. */
+function taskInMyBus(me: SessionUser): SQL {
   return or(
+    clientInMyBus(me, t.clientId),
+    inArray(t.meetingId, db.select({ id: schema.meetings.id }).from(schema.meetings).where(meetingInMyBus(me))),
+    userInMyBus(me, t.createdById),
+    exists(db.select({ one: sql`1` }).from(schema.taskAssignees).where(and(eq(schema.taskAssignees.taskId, t.id), userInMyBus(me, schema.taskAssignees.userId)))),
+  )!;
+}
+
+/**
+ * Super Admins see every task; BU Admins see the tasks of their business units. Everyone sees tasks they
+ * created or are assigned to (directly or through a group they're in).
+ */
+export function taskVisibleTo(me: SessionUser): SQL | undefined {
+  if (isSuperAdmin(me)) return undefined;
+  return or(
+    isAdmin(me) ? taskInMyBus(me) : undefined,
     eq(t.createdById, me.id),
     exists(
       db
@@ -64,16 +79,20 @@ export function taskVisibleTo(me: SessionUser): SQL | undefined {
 }
 
 export async function canViewTask(me: SessionUser, id: number) {
-  if (me.role === "ADMIN") return true;
+  if (isSuperAdmin(me)) return true;
   const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, id), taskVisibleTo(me)));
   return !!row;
 }
-/** Editing the task itself: creator or Admin. */
-export const canEditTask = (me: SessionUser, task: { createdById: number | null }) => me.role === "ADMIN" || task.createdById === me.id;
-/** Updating status / progress / checklist: creator, Admin or any assignee. */
+/** Editing the task itself: the creator, a Super Admin, or an Admin of the task's business units. */
+export async function canEditTask(me: SessionUser, task: { id: number; createdById: number | null }) {
+  if (isSuperAdmin(me) || task.createdById === me.id) return true;
+  if (!isAdmin(me)) return false;
+  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), taskInMyBus(me)));
+  return !!row;
+}
+/** Updating status / progress / checklist: whoever can edit it, or anyone who can see it (assignees). */
 export async function canWorkOnTask(me: SessionUser, task: { id: number; createdById: number | null }) {
-  if (canEditTask(me, task)) return true;
-  return canViewTask(me, task.id);
+  return (await canEditTask(me, task)) || canViewTask(me, task.id);
 }
 
 export async function logTaskActivity(taskId: number, userId: number | null, action: string, details?: Record<string, unknown>) {

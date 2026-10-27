@@ -43,7 +43,7 @@ export async function clientNameMatches(name: string, excludeId?: number | null)
 export async function assertClientName(name: string, opts: { excludeId?: number | null; confirmed: boolean; previousName?: string | null }) {
   const clean = cleanClientName(name);
   const { exact, similar } = await clientNameMatches(clean, opts.excludeId);
-  if (exact) throw new FormError(`"${exact.name}" already exists in the client master. Open it instead of adding it again.`);
+  if (exact) throw new FormError(`"${exact.name}" already exists in the client master. Open it instead of adding it again; if you can't find it, it belongs to another business unit, so ask an Admin to add your unit to it.`);
   const renamed = !opts.previousName || opts.previousName.toLowerCase() !== clean.toLowerCase();
   if (renamed && similar.length && !opts.confirmed)
     throw new FormError(

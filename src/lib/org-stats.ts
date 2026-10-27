@@ -1,6 +1,8 @@
-import { and, asc, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, countDistinct, eq, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { riyadh, todayRiyadh } from "./meetings";
+import { clientVisibleTo } from "./access";
+import { isSuperAdmin, type SessionUser } from "./auth";
+import { riyadh, todayRiyadh, visibleTo } from "./meetings";
 
 const count = sql<number>`count(*)`.mapWith(Number);
 const m = schema.meetings;
@@ -15,20 +17,27 @@ const monthStart = (key: string) => riyadh(`${key}-01`, "00:00");
 export type MonthPoint = { key: string; label: string; held: number };
 export type BuRow = { id: number | null; name: string; users: number; held: number; clients: number };
 
-/** Admin overview: meetings held per month, the BU breakdown, and the headline counts. */
-export async function orgStats() {
+/** Admin overview: meetings held per month, the BU breakdown, and the headline counts — limited to the Admin's business units. */
+export async function orgStats(me: SessionUser) {
   const today = todayRiyadh();
   const thisMonth = monthKey(today, 0);
   const firstMonth = monthKey(today, -11);
   const since = monthStart(firstMonth);
   const until = monthStart(monthKey(today, 1));
-  const held = and(eq(m.status, "COMPLETED"), gte(m.startAt, since), lt(m.startAt, until));
+  const held = and(eq(m.status, "COMPLETED"), gte(m.startAt, since), lt(m.startAt, until), visibleTo(me));
+  const myBus = isSuperAdmin(me) ? undefined : inArray(schema.businessUnits.id, me.buIds);
+  const ub = schema.userBusinessUnits;
+  const activeMember = and(eq(schema.users.status, "ACTIVE"), isSuperAdmin(me) ? undefined : inArray(ub.businessUnitId, me.buIds));
   const month = sql<string>`to_char(${m.startAt} at time zone 'Asia/Riyadh', 'YYYY-MM')`;
 
-  const [perMonth, bus, usersByBu, heldByBu, clientsByBu, clientStatus, [upcoming]] = await Promise.all([
+  const [perMonth, bus, usersByBu, [users], heldByBu, clientsByBu, clientStatus, [upcoming]] = await Promise.all([
     db.select({ key: month, n: count }).from(m).where(held).groupBy(month),
-    db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)).orderBy(asc(schema.businessUnits.name)),
-    db.select({ id: schema.users.businessUnitId, n: count }).from(schema.users).where(eq(schema.users.status, "ACTIVE")).groupBy(schema.users.businessUnitId),
+    db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(and(eq(schema.businessUnits.active, true), myBus)).orderBy(asc(schema.businessUnits.name)),
+    // People with access to several units count in each of them
+    db.select({ id: ub.businessUnitId, n: count }).from(ub).innerJoin(schema.users, eq(ub.userId, schema.users.id)).where(activeMember).groupBy(ub.businessUnitId),
+    isSuperAdmin(me)
+      ? db.select({ n: count }).from(schema.users).where(eq(schema.users.status, "ACTIVE"))
+      : db.select({ n: countDistinct(ub.userId) }).from(ub).innerJoin(schema.users, eq(ub.userId, schema.users.id)).where(activeMember),
     db
       .select({ id: schema.meetingBusinessUnits.businessUnitId, n: count })
       .from(schema.meetingBusinessUnits)
@@ -41,11 +50,11 @@ export async function orgStats() {
       .innerJoin(schema.clients, eq(schema.clientBusinessUnits.clientId, schema.clients.id))
       .where(ne(schema.clients.status, "INACTIVE"))
       .groupBy(schema.clientBusinessUnits.businessUnitId),
-    db.select({ status: schema.clients.status, n: count }).from(schema.clients).groupBy(schema.clients.status),
+    db.select({ status: schema.clients.status, n: count }).from(schema.clients).where(clientVisibleTo(me)).groupBy(schema.clients.status),
     db
       .select({ n: count })
       .from(m)
-      .where(and(inArray(m.status, ["SCHEDULED", "CONFIRMED"]), gte(m.startAt, new Date()), lt(m.startAt, new Date(Date.now() + 7 * 86400_000)))),
+      .where(and(inArray(m.status, ["SCHEDULED", "CONFIRMED"]), gte(m.startAt, new Date()), lt(m.startAt, new Date(Date.now() + 7 * 86400_000)), visibleTo(me))),
   ]);
 
   const months: MonthPoint[] = Array.from({ length: 12 }, (_, i) => {
@@ -56,8 +65,6 @@ export async function orgStats() {
 
   const pick = (rows: { id: number | null; n: number }[], id: number | null) => rows.find((r) => r.id === id)?.n ?? 0;
   const buRows: BuRow[] = bus.map((b) => ({ id: b.id, name: b.name, users: pick(usersByBu, b.id), held: pick(heldByBu, b.id), clients: pick(clientsByBu, b.id) }));
-  const unassignedUsers = pick(usersByBu, null);
-  if (unassignedUsers) buRows.push({ id: null, name: "No business unit", users: unassignedUsers, held: 0, clients: 0 });
 
   const clientCount = (s: string) => clientStatus.find((c) => c.status === s)?.n ?? 0;
   return {
@@ -67,7 +74,7 @@ export async function orgStats() {
     heldYear: months.reduce((s, p) => s + p.held, 0),
     thisMonth,
     buRows,
-    activeUsers: usersByBu.reduce((s, r) => s + r.n, 0),
+    activeUsers: users.n,
     clients: { active: clientCount("ACTIVE"), pending: clientCount("PENDING_REVIEW"), inactive: clientCount("INACTIVE") },
     upcoming7: upcoming.n,
   };

@@ -1,6 +1,7 @@
-import { and, eq, exists, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, inArray, not, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import type { SessionUser } from "./auth";
+import { clientInMyBus } from "./access";
+import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 
 // ---------- labels ----------
 export const MEETING_STATUSES = ["TO_BE_SCHEDULED", "SCHEDULED", "CONFIRMED", "COMPLETED", "POSTPONED", "CANCELLED"] as const;
@@ -64,11 +65,29 @@ export const fmtPlainDate = (s: string | null | undefined) =>
   s ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${s.slice(0, 10)}T00:00:00Z`)) : "—";
 
 // ---------- visibility ----------
-/** Users see meetings they organise, attend (directly or via a group), own the next action of, or own an agreed action on its brief. Admins see all. */
+/**
+ * The meeting belongs to one of the user's business units: its own business units when it has any,
+ * otherwise its client's business units.
+ */
+export function meetingInMyBus(me: SessionUser): SQL {
+  const m = schema.meetings;
+  const mbu = schema.meetingBusinessUnits;
+  const tagged = exists(db.select({ one: sql`1` }).from(mbu).where(eq(mbu.meetingId, m.id)));
+  return or(
+    exists(db.select({ one: sql`1` }).from(mbu).where(and(eq(mbu.meetingId, m.id), inArray(mbu.businessUnitId, me.buIds)))),
+    and(not(tagged), clientInMyBus(me, m.clientId)),
+  )!;
+}
+
+/**
+ * Super Admins see every meeting. Everyone else sees meetings of their business units, plus meetings they
+ * organise, attend (directly or via a group), own the next action of, or own an agreed action on its brief.
+ */
 export function visibleTo(me: SessionUser): SQL | undefined {
-  if (me.role === "ADMIN") return undefined;
+  if (isSuperAdmin(me)) return undefined;
   const m = schema.meetings;
   return or(
+    meetingInMyBus(me),
     eq(m.organiserId, me.id),
     exists(
       db
@@ -102,20 +121,29 @@ export function visibleTo(me: SessionUser): SQL | undefined {
 }
 
 export async function canView(me: SessionUser, meetingId: number) {
-  if (me.role === "ADMIN") return true;
+  if (isSuperAdmin(me)) return true;
   const [row] = await db
     .select({ id: schema.meetings.id })
     .from(schema.meetings)
     .where(and(eq(schema.meetings.id, meetingId), visibleTo(me)));
   return !!row;
 }
-export const canEditMeeting = (me: SessionUser, m: { organiserId: number }) => me.role === "ADMIN" || m.organiserId === me.id;
+/** Editing: the organiser, a Super Admin, or an Admin of the meeting's business units. */
+export async function canEditMeeting(me: SessionUser, m: { id: number; organiserId: number }) {
+  if (isSuperAdmin(me) || m.organiserId === me.id) return true;
+  if (!isAdmin(me)) return false;
+  const [row] = await db
+    .select({ id: schema.meetings.id })
+    .from(schema.meetings)
+    .where(and(eq(schema.meetings.id, m.id), meetingInMyBus(me)));
+  return !!row;
+}
 
-/** Organiser, Admin, or anyone on the attendee list can write the Meeting Brief. Returns the meeting or null. */
+/** Whoever can edit the meeting, or anyone on the attendee list, can write the Meeting Brief. Returns the meeting or null. */
 export async function canWriteBrief(me: SessionUser, meetingId: number) {
   const m = await db.query.meetings.findFirst({ where: eq(schema.meetings.id, meetingId), with: { attendees: true } });
   if (!m) return null;
-  return canEditMeeting(me, m) || m.attendees.some((a) => a.userId === me.id) ? m : null;
+  return m.attendees.some((a) => a.userId === me.id) || (await canEditMeeting(me, m)) ? m : null;
 }
 
 // ---------- activity log ----------

@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Empty, fmtDate, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { deleteGroup } from "@/lib/actions/groups";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { listMeetings } from "@/lib/meeting-queries";
 import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
@@ -34,9 +34,11 @@ export default async function GroupPage({ params, searchParams }: { params: { id
     .leftJoin(schema.businessUnits, eq(schema.users.businessUnitId, schema.businessUnits.id))
     .where(eq(schema.groupMembers.groupId, id))
     .orderBy(asc(schema.users.fullName));
-  if (me.role !== "ADMIN" && !members.some((m) => m.id === me.id)) redirect("/groups");
-  const meetings = (await listMeetings({ ...me, role: "ADMIN" }, { group: String(id), status: "OPEN" }, 10)).filter((x) => x.status !== "POSTPONED");
-  const groupTasks = await listTasks({ ...me, role: "ADMIN" }, { scope: "all", bucket: "open", group: String(id) }, 15);
+  if (!isAdmin(me) && !members.some((m) => m.id === me.id)) redirect("/groups");
+  // Members see all of the group's meetings and tasks; an Admin outside the group sees only what their access allows.
+  const viewer = members.some((m) => m.id === me.id) ? { ...me, role: "SUPER_ADMIN" as const } : me;
+  const meetings = (await listMeetings(viewer, { group: String(id), status: "OPEN" }, 10)).filter((x) => x.status !== "POSTPONED");
+  const groupTasks = await listTasks(viewer, { scope: "all", bucket: "open", group: String(id) }, 15);
 
   return (
     <>
@@ -44,7 +46,7 @@ export default async function GroupPage({ params, searchParams }: { params: { id
         title={group.name}
         subtitle={`${labelize(group.type)} · Lead: ${group.lead?.fullName ?? "—"} · ${members.length} members`}
         actions={
-          me.role === "ADMIN" && (
+          isAdmin(me) && (
             <>
               <Link href={`/groups/${id}/edit`} className="btn-primary">
                 Edit group

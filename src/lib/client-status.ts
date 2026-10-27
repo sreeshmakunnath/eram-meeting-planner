@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { clientVisibleTo } from "./access";
 import type { SessionUser } from "./auth";
 import { todayRiyadh, visibleTo, type MeetingStatus } from "./meetings";
 import { OPEN_STATUSES, taskVisibleTo } from "./tasks";
@@ -44,7 +45,7 @@ export async function clientStatusRows(me: SessionUser) {
       })
       .from(schema.clients)
       .leftJoin(schema.users, eq(schema.clients.accountOwnerId, schema.users.id))
-      .where(ne(schema.clients.status, "INACTIVE"))
+      .where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me)))
       .orderBy(asc(schema.clients.name)),
     db
       .select({

@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { Badge, Empty, fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
 import { deleteMeeting, setMeetingStatus } from "@/lib/actions/meetings";
-import { requireUser } from "@/lib/auth";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { listTasks } from "@/lib/task-queries";
 import {
@@ -70,7 +70,7 @@ export default async function MeetingPage({ params, searchParams }: { params: { 
   });
   if (!m) notFound();
   if (!(await canView(me, id))) redirect("/meetings");
-  const editable = canEditMeeting(me, m);
+  const editable = await canEditMeeting(me, m);
   const tab = searchParams.tab ?? "details";
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
   const base = `/meetings/${id}`;
@@ -160,7 +160,7 @@ export default async function MeetingPage({ params, searchParams }: { params: { 
               <button className="btn-danger">Cancel meeting</button>
             </form>
           )}
-          {me.role === "ADMIN" && (
+          {isAdmin(me) && (
             <form action={deleteMeeting.bind(null, id)}>
               <button className="btn-danger">Delete</button>
             </form>

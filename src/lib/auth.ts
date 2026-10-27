@@ -64,7 +64,7 @@ export const authOptions: NextAuthOptions = {
           .set({ failedLogins: 0, lockedUntil: null, lastLoginAt: new Date() })
           .where(eq(schema.users.id, user.id));
         await audit(user.id, "LOGIN", "user", user.id);
-        return { id: String(user.id), name: user.fullName, email: user.email, role: user.role };
+        return { id: String(user.id), name: user.fullName, email: user.email, role: user.role, buIds: await userBuIds(user.id) };
       },
     }),
   ],
@@ -73,6 +73,7 @@ export const authOptions: NextAuthOptions = {
       if (user) {
         token.uid = Number(user.id);
         token.role = user.role;
+        token.buIds = user.buIds;
         return token;
       }
       // On later requests, re-read role and status so admin changes apply without re-login.
@@ -86,6 +87,7 @@ export const authOptions: NextAuthOptions = {
           if (!u || u.status !== "ACTIVE") token.inactive = true;
           else {
             token.role = u.role;
+            token.buIds = await userBuIds(token.uid);
             token.name = u.fullName;
             token.inactive = false;
           }
@@ -103,6 +105,7 @@ export const authOptions: NextAuthOptions = {
         name: token.name ?? "",
         email: token.email ?? "",
         role: token.role ?? "USER",
+        buIds: token.buIds ?? [],
       };
       if (token.inactive) (session as { inactive?: boolean }).inactive = true;
       return session;
@@ -110,7 +113,18 @@ export const authOptions: NextAuthOptions = {
   },
 };
 
-export type SessionUser = { id: number; name: string; email: string; role: "ADMIN" | "USER" };
+export type Role = "SUPER_ADMIN" | "ADMIN" | "USER";
+/** buIds: the business units the user has access to (empty for a Super Admin is fine: they see everything). */
+export type SessionUser = { id: number; name: string; email: string; role: Role; buIds: number[] };
+
+/** Business units the user can access. Re-read on every request so admin changes apply without re-login. */
+async function userBuIds(userId: number) {
+  const rows = await db
+    .select({ id: schema.userBusinessUnits.businessUnitId })
+    .from(schema.userBusinessUnits)
+    .where(eq(schema.userBusinessUnits.userId, userId));
+  return rows.map((r) => r.id);
+}
 
 /** For server components and actions: returns the signed-in user or redirects to /login. */
 export async function requireUser(): Promise<SessionUser> {
@@ -119,9 +133,20 @@ export async function requireUser(): Promise<SessionUser> {
   return session.user;
 }
 
-/** Same as requireUser, but only Admins pass; Users are sent to the dashboard. */
+export const isSuperAdmin = (me: { role: Role }) => me.role === "SUPER_ADMIN";
+/** Super Admins and business-unit Admins. */
+export const isAdmin = (me: { role: Role }) => me.role === "SUPER_ADMIN" || me.role === "ADMIN";
+
+/** Same as requireUser, but only Admins (BU or Super) pass; Users are sent to the dashboard. */
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await requireUser();
-  if (user.role !== "ADMIN") redirect("/?denied=1");
+  if (!isAdmin(user)) redirect("/?denied=1");
+  return user;
+}
+
+/** Only the Super Admin (parent company) passes: business units, masters, audit log. */
+export async function requireSuperAdmin(): Promise<SessionUser> {
+  const user = await requireUser();
+  if (!isSuperAdmin(user)) redirect("/?denied=1");
   return user;
 }

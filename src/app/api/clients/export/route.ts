@@ -1,6 +1,7 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { getServerSession } from "next-auth";
 import { db, schema } from "@/db";
+import { clientVisibleTo } from "@/lib/access";
 import { authOptions } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
     })
     .from(clients)
     .leftJoin(users, eq(clients.accountOwnerId, users.id))
-    .where(status === "ALL" ? undefined : eq(clients.status, status as "ACTIVE" | "INACTIVE" | "PENDING_REVIEW"))
+    .where(and(clientVisibleTo(session.user), status === "ALL" ? undefined : eq(clients.status, status as "ACTIVE" | "INACTIVE" | "PENDING_REVIEW")))
     .orderBy(asc(clients.name));
   const header = ["Client", "Short code", "Type", "Industry", "Country", "City", "Website", "BD stage", "Status", "Account owner"];
   const lines = rows.map((r) =>

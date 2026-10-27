@@ -17,7 +17,8 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
-export const roleEnum = pgEnum("role", ["ADMIN", "USER"]);
+// SUPER_ADMIN: the parent company (Eram Holding), sees everything. ADMIN: manages the business units they belong to.
+export const roleEnum = pgEnum("role", ["SUPER_ADMIN", "ADMIN", "USER"]);
 export const userStatusEnum = pgEnum("user_status", ["ACTIVE", "INACTIVE"]);
 export const groupTypeEnum = pgEnum("group_type", ["DEPARTMENT", "BRANCH", "PROJECT", "CLIENT_ACCOUNT", "OTHER"]);
 export const groupStatusEnum = pgEnum("group_status", ["ACTIVE", "ARCHIVED"]);
@@ -59,6 +60,7 @@ export const users = pgTable(
     branchId: integer("branch_id")
       .notNull()
       .references(() => branches.id),
+    /** Primary (home) business unit. Access covers every unit in user_business_units, which always includes this one. */
     businessUnitId: integer("business_unit_id")
       .notNull()
       .references(() => businessUnits.id),
@@ -76,6 +78,20 @@ export const users = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [index("users_branch_idx").on(t.branchId), index("users_status_idx").on(t.status)],
+);
+
+/** Business units a user (or admin) has access to. Users see clients and meetings of these units. */
+export const userBusinessUnits = pgTable(
+  "user_business_units",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.businessUnitId] }), index("user_business_units_bu_idx").on(t.businessUnitId)],
 );
 
 export const groups = pgTable("groups", {
@@ -153,6 +169,10 @@ export const clientContacts = pgTable(
     email: varchar("email", { length: 150 }),
     phone: varchar("phone", { length: 30 }),
     isPrimary: boolean("is_primary").default(false).notNull(),
+    /** Who added the contact. Private contacts are seen only by the owner, the client's account owner and Admins. */
+    ownerId: integer("owner_id").references(() => users.id, { onDelete: "set null" }),
+    /** Shared: everyone who can see the client sees the contact. */
+    shared: boolean("shared").default(false).notNull(),
     createdAt: createdAt(),
   },
   (t) => [index("client_contacts_client_idx").on(t.clientId)],
@@ -189,6 +209,7 @@ export const auditLogs = pgTable(
 export const branchesRelations = relations(branches, ({ many }) => ({ users: many(users) }));
 export const businessUnitsRelations = relations(businessUnits, ({ many }) => ({
   users: many(users),
+  members: many(userBusinessUnits),
   clients: many(clientBusinessUnits),
 }));
 
@@ -197,6 +218,12 @@ export const usersRelations = relations(users, ({ one, many }) => ({
   businessUnit: one(businessUnits, { fields: [users.businessUnitId], references: [businessUnits.id] }),
   manager: one(users, { fields: [users.managerId], references: [users.id], relationName: "manager" }),
   memberships: many(groupMembers),
+  businessUnits: many(userBusinessUnits),
+}));
+
+export const userBusinessUnitsRelations = relations(userBusinessUnits, ({ one }) => ({
+  user: one(users, { fields: [userBusinessUnits.userId], references: [users.id] }),
+  businessUnit: one(businessUnits, { fields: [userBusinessUnits.businessUnitId], references: [businessUnits.id] }),
 }));
 
 export const groupsRelations = relations(groups, ({ one, many }) => ({
@@ -227,6 +254,7 @@ export const clientBusinessUnitsRelations = relations(clientBusinessUnits, ({ on
 
 export const clientContactsRelations = relations(clientContacts, ({ one }) => ({
   client: one(clients, { fields: [clientContacts.clientId], references: [clients.id] }),
+  owner: one(users, { fields: [clientContacts.ownerId], references: [users.id] }),
 }));
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({

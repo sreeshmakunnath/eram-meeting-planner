@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin } from "@/lib/auth";
+import { requireSuperAdmin } from "@/lib/auth";
 import { req, toFormError } from "@/lib/form";
 
 type Kind = "branch" | "businessUnit";
@@ -12,7 +12,7 @@ const table = (k: Kind) => (k === "branch" ? schema.branches : schema.businessUn
 
 export async function addMaster(kind: Kind, _: ActionState, fd: FormData): Promise<ActionState> {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireSuperAdmin();
     const name = req(fd, "name", "Name");
     const [row] = await db.insert(table(kind)).values({ name }).returning();
     await audit(admin.id, "MASTER_ADDED", kind, row.id, { name });
@@ -25,7 +25,7 @@ export async function addMaster(kind: Kind, _: ActionState, fd: FormData): Promi
 
 export async function renameMaster(kind: Kind, id: number, _: ActionState, fd: FormData): Promise<ActionState> {
   try {
-    const admin = await requireAdmin();
+    const admin = await requireSuperAdmin();
     const name = req(fd, "name", "Name");
     const t = table(kind);
     await db.update(t).set({ name }).where(eq(t.id, id));
@@ -38,7 +38,7 @@ export async function renameMaster(kind: Kind, id: number, _: ActionState, fd: F
 }
 
 export async function toggleMaster(kind: Kind, id: number, active: boolean) {
-  const admin = await requireAdmin();
+  const admin = await requireSuperAdmin();
   const t = table(kind);
   await db.update(t).set({ active }).where(eq(t.id, id));
   await audit(admin.id, active ? "MASTER_ACTIVATED" : "MASTER_DEACTIVATED", kind, id);

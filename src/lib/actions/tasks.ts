@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
+import { canSeeClient } from "@/lib/access";
 import { requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
@@ -65,7 +66,7 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
     id = int(fd, "id");
     const before = id ? await loadTask(id) : undefined;
     if (id && !before) throw new FormError("Task not found.");
-    if (before && !canEditTask(me, before)) throw new FormError("Only the creator or an Admin can edit this task.");
+    if (before && !(await canEditTask(me, before))) throw new FormError("Only the creator or an Admin can edit this task.");
 
     const data = {
       title: req(fd, "title", "Title"),
@@ -82,6 +83,8 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
     const userIds = ints(fd, "userIds");
     const groupIds = ints(fd, "groupIds");
     if (!userIds.length && !groupIds.length) throw new FormError("Assign the task to at least one person or group.");
+
+    if (data.clientId && data.clientId !== before?.clientId && !(await canSeeClient(me, data.clientId))) throw new FormError("You don't have access to that client.");
 
     // A meeting link implies its client
     if (data.meetingId && !data.clientId) {
@@ -232,7 +235,7 @@ export async function addComment(id: number, _: ActionState, fd: FormData): Prom
 export async function deleteTask(id: number) {
   const me = await requireUser();
   const task = await loadTask(id);
-  if (!task || !canEditTask(me, task)) redirect(`/tasks/${id}?msg=denied`);
+  if (!task || !(await canEditTask(me, task))) redirect(`/tasks/${id}?msg=denied`);
   await db.delete(schema.tasks).where(eq(schema.tasks.id, id));
   revalidatePath("/tasks");
   redirect("/tasks?msg=deleted");

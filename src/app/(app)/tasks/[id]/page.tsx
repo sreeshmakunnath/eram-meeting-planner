@@ -33,7 +33,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
   });
   if (!task) notFound();
   if (!(await canViewTask(me, id))) redirect("/tasks");
-  const editable = canEditTask(me, task);
+  const editable = await canEditTask(me, task);
   const assigned = task.assignees.some((a) => a.userId === me.id);
   const canWork = editable || assigned || task.groups.length > 0; // group members reach here only through visibility
   const activity = await db

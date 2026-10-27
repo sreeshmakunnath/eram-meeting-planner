@@ -4,7 +4,8 @@ import { and, eq, isNull, ne } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { requireAdmin, requireUser } from "@/lib/auth";
+import { canManageClient } from "@/lib/access";
+import { requireSuperAdmin, requireUser } from "@/lib/auth";
 import { isSimilar } from "@/lib/similar";
 import { CATEGORY_LABEL, logTaskActivity, type TaskCategory, type TaskStatus } from "@/lib/tasks";
 import { BD_CATEGORIES } from "@/lib/target-schedule";
@@ -14,7 +15,7 @@ import { asDate, norm, text } from "@/lib/xl-read";
 export async function createBdTasks(clientId: number) {
   const me = await requireUser();
   const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
-  if (!client || (me.role !== "ADMIN" && client.accountOwnerId !== me.id)) return;
+  if (!client || !(await canManageClient(me, client))) return;
   const existing = await db
     .select({ category: schema.tasks.category })
     .from(schema.tasks)
@@ -47,7 +48,7 @@ const STATUS: Record<string, TaskStatus> = {
 
 /** Imports the "BD Target Companies – Batch N Schedule" sheet into clients + BD tasks. Re-running updates instead of duplicating. */
 export async function importTargetSchedule(_: TargetImportResult | undefined, fd: FormData): Promise<TargetImportResult> {
-  const admin = await requireAdmin();
+  const admin = await requireSuperAdmin();
   const file = fd.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose an .xlsx file." };
   const wb = new ExcelJS.Workbook();

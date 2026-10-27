@@ -1,11 +1,11 @@
 import { withAuth } from "next-auth/middleware";
 import { NextResponse } from "next/server";
 
-// Every page needs a signed-in user; /admin/* needs the ADMIN role.
+// Every page needs a signed-in user; /admin/* needs an Admin role (BU Admin or Super Admin).
 // Role checks are repeated on the server in each page and action (requireUser / requireAdmin).
 export default withAuth(
   function middleware(req) {
-    if (req.nextUrl.pathname.startsWith("/admin") && req.nextauth.token?.role !== "ADMIN") {
+    if (req.nextUrl.pathname.startsWith("/admin") && !["ADMIN", "SUPER_ADMIN"].includes(req.nextauth.token?.role ?? "")) {
       return NextResponse.redirect(new URL("/?denied=1", req.url));
     }
     return NextResponse.next();

@@ -7,7 +7,7 @@ import { Logo } from "./logo";
 
 type Item = { href: string; label: string; soon?: string; badge?: number };
 
-export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: string; role: "ADMIN" | "USER"; unread?: number }) {
+export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: string; role: "SUPER_ADMIN" | "ADMIN" | "USER"; unread?: number }) {
   const path = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [path]); // close the phone menu after navigating
@@ -44,8 +44,13 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
   ];
   const admin: Item[] = [
     { href: "/admin/users", label: "Users" },
-    { href: "/admin/masters", label: "Branches & BUs" },
-    { href: "/admin/audit", label: "Audit log" },
+    // Business units, masters and the audit log belong to the parent company (Super Admin)
+    ...(role === "SUPER_ADMIN"
+      ? [
+          { href: "/admin/masters", label: "Branches & BUs" },
+          { href: "/admin/audit", label: "Audit log" },
+        ]
+      : []),
   ];
   const isActive = (href: string) =>
     href === "/" ? path === "/" : href === "/meetings" ? path.startsWith("/meetings") && !path.startsWith("/meetings/calendar") : path.startsWith(href);
@@ -92,7 +97,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
         {main.map(link)}
         <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-white/50">Reports</div>
         {reports.map(link)}
-        {role === "ADMIN" && (
+        {role !== "USER" && (
           <>
             <div className="px-3 pb-1 pt-5 text-[11px] font-semibold uppercase tracking-wider text-white/50">Administration</div>
             {admin.map(link)}
@@ -103,7 +108,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
         <Link href="/profile" className="block font-semibold hover:underline">
           {name}
         </Link>
-        <div className="text-xs text-white/60">{role === "ADMIN" ? "Admin" : "User"}</div>
+        <div className="text-xs text-white/60">{role === "SUPER_ADMIN" ? "Super Admin" : role === "ADMIN" ? "Admin" : "User"}</div>
         <button onClick={() => signOut({ callbackUrl: "/login" })} className="mt-3 text-xs text-white/70 hover:text-white">
           Sign out
         </button>
