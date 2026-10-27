@@ -192,7 +192,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
       .where(and(gte(m.startAt, riyadh(`${today.slice(0, 7)}-01`, "00:00")), lt(m.startAt, riyadh(new Date(Date.UTC(Number(today.slice(0, 4)), Number(today.slice(5, 7)), 1)).toISOString().slice(0, 10), "00:00")), notInArray(m.status, ["CANCELLED"]), visibleTo(viewer))),
     db.select({ n: count }).from(m).where(and(inArray(m.status, ["TO_BE_SCHEDULED", "POSTPONED"]), visibleTo(viewer))),
     clientStatusRows(viewer),
-    listTasks(viewer, { scope: "all", bucket: "overdue" }, 1000),
+    listTasks(viewer, { scope: "all", bucket: "overdue", bu: scoped ? String(scoped.buIds[0]) : undefined }, 1000), // same filter as the linked list
     meetingsBetween(viewer, now, new Date(now.getTime() + 7 * 86400_000), notInArray(m.status, ["CANCELLED", "POSTPONED"])),
     recentActivity(viewer, 15),
   ]);

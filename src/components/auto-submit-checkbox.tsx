@@ -1,5 +1,5 @@
 "use client";
-/** A checkbox that submits its form when ticked or unticked (used by task checklists). */
+/** A checkbox that submits its form when ticked or unticked (used by subtasks). */
 export function AutoSubmitCheckbox({ checked, disabled, label }: { checked: boolean; disabled?: boolean; label: string }) {
   return (
     <input

@@ -57,6 +57,13 @@
       "when": 1793101419033,
       "tag": "0007_private_contacts",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793104596870,
+      "tag": "0008_subtasks",
+      "breakpoints": true
     }
   ]
 }

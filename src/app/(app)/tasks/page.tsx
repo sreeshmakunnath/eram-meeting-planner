@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { BuFilterNotice } from "@/components/bu-filter-notice";
 import { Badge, Empty, Notice, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { fmtPlainDate, PRIORITY_LABEL } from "@/lib/meetings";
@@ -41,7 +40,6 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
         }
       />
       <TaskTabs active="list" qs={keep.length ? new URLSearchParams(keep).toString() : ""} />
-      <BuFilterNotice bu={searchParams.bu} params={searchParams} path="/tasks" />
       {searchParams.msg === "deleted" && <Notice tone="ok">Task deleted.</Notice>}
       {searchParams.msg === "copies" && <Notice tone="ok">Created {searchParams.n} separate tasks, one per person.</Notice>}
       <div className="mb-3 flex flex-wrap gap-1.5">
@@ -87,6 +85,7 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
                     <div className="text-xs text-slate-500">
                       {CATEGORY_LABEL[r.category]}
                       {r.fromBrief && " · from Meeting Brief"}
+                      {r.parentId && <> · subtask of <Link href={`/tasks/${r.parentId}`} className="hover:underline">{r.parentTitle}</Link></>}
                     </div>
                   </td>
                   <td>

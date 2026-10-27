@@ -16,6 +16,7 @@ import {
   expandAssignees,
   logTaskActivity,
   notifyTaskAssigned,
+  syncParentProgress,
   TASK_CATEGORIES,
   TASK_STATUS_LABEL,
   TASK_STATUSES,
@@ -55,6 +56,10 @@ async function applyStatus(me: SessionUser, taskId: number, status: TaskStatus, 
     await logTaskActivity(taskId, me.id, "STATUS_CHANGED", { from: task.status, to: status });
     if (status === "COMPLETED") await notifyCompleted(taskId, me);
   } else if (percent !== undefined && percent !== task.percent) await logTaskActivity(taskId, me.id, "PROGRESS", { from: task.percent, to: p });
+  if (task.parentTaskId) {
+    await syncParentProgress(task.parentTaskId);
+    revalidatePath(`/tasks/${task.parentTaskId}`);
+  }
   revalidatePath("/tasks");
   revalidatePath(`/tasks/${taskId}`);
 }
@@ -165,39 +170,47 @@ export async function updateProgress(id: number, _: ActionState, fd: FormData): 
   }
 }
 
-export async function addChecklistItem(id: number, _: ActionState, fd: FormData): Promise<ActionState> {
+/** Adds a subtask: its own task with one person, a due date (the main task's if left blank) and the main task's client, meeting and priority. */
+export async function addSubtask(parentId: number, _: ActionState, fd: FormData): Promise<ActionState> {
   try {
     const me = await requireUser();
-    const task = await loadTask(id);
-    if (!task || !(await canWorkOnTask(me, task))) throw new FormError("You can't change this task.");
-    const items = await db.select().from(schema.taskChecklist).where(eq(schema.taskChecklist.taskId, id));
-    await db.insert(schema.taskChecklist).values({ taskId: id, text: req(fd, "text", "Item").slice(0, 300), position: items.length });
-    revalidatePath(`/tasks/${id}`);
-    return { ok: undefined };
+    const parent = await loadTask(parentId);
+    if (!parent || !(await canWorkOnTask(me, parent))) throw new FormError("You can't add subtasks to this task.");
+    if (parent.parentTaskId) throw new FormError("A subtask can't have its own subtasks.");
+    const title = req(fd, "title", "Subtask").slice(0, 200);
+    const assigneeId = int(fd, "assigneeId");
+    if (!assigneeId) throw new FormError("Choose who the subtask is assigned to.");
+    const [assignee] = await db
+      .select({ id: schema.users.id, fullName: schema.users.fullName })
+      .from(schema.users)
+      .where(and(eq(schema.users.id, assigneeId), eq(schema.users.status, "ACTIVE")));
+    if (!assignee) throw new FormError("That person isn't an active user.");
+    const dueDate = str(fd, "dueDate") ?? parent.dueDate;
+    const [sub] = await db
+      .insert(schema.tasks)
+      .values({ title, category: "GENERAL", parentTaskId: parentId, clientId: parent.clientId, meetingId: parent.meetingId, priority: parent.priority, dueDate, createdById: me.id })
+      .returning();
+    await db.insert(schema.taskAssignees).values({ taskId: sub.id, userId: assignee.id });
+    await logTaskActivity(sub.id, me.id, "CREATED", { subtaskOf: parent.title });
+    await logTaskActivity(parentId, me.id, "SUBTASK_ADDED", { subtask: title, assignedTo: assignee.fullName });
+    if (assignee.id !== me.id) await notifyTaskAssigned(sub.id, [assignee.id], me.name, me.id);
+    await syncParentProgress(parentId);
+    revalidatePath(`/tasks/${parentId}`);
+    revalidatePath("/tasks");
+    return { ok: `Subtask added for ${assignee.fullName}.` };
   } catch (e) {
     return toFormError(e);
   }
 }
 
-export async function toggleChecklistItem(taskId: number, itemId: number, done: boolean) {
+/** Tick / untick a subtask on the main task's page. */
+export async function toggleSubtask(subtaskId: number, done: boolean) {
   const me = await requireUser();
-  const task = await loadTask(taskId);
-  if (!task || !(await canWorkOnTask(me, task))) return;
-  await db.update(schema.taskChecklist).set({ done }).where(and(eq(schema.taskChecklist.id, itemId), eq(schema.taskChecklist.taskId, taskId)));
-  // Checklist drives progress when the task has one
-  const items = await db.select().from(schema.taskChecklist).where(eq(schema.taskChecklist.taskId, taskId));
-  const pct = Math.round((items.filter((i) => i.done).length / items.length) * 100);
-  const status: TaskStatus = pct === 100 ? task.status : task.status === "NOT_STARTED" && pct > 0 ? "IN_PROGRESS" : task.status;
-  await db.update(schema.tasks).set({ percent: pct, status }).where(eq(schema.tasks.id, taskId));
-  revalidatePath(`/tasks/${taskId}`);
-}
-
-export async function deleteChecklistItem(taskId: number, itemId: number) {
-  const me = await requireUser();
-  const task = await loadTask(taskId);
-  if (!task || !(await canWorkOnTask(me, task))) return;
-  await db.delete(schema.taskChecklist).where(and(eq(schema.taskChecklist.id, itemId), eq(schema.taskChecklist.taskId, taskId)));
-  revalidatePath(`/tasks/${taskId}`);
+  try {
+    await applyStatus(me, subtaskId, done ? "COMPLETED" : "NOT_STARTED", done ? 100 : 0);
+  } catch {
+    // no rights: the checkbox is disabled for them anyway
+  }
 }
 
 /** Comments; "@username" or "@Firstname" emails the mentioned person. */
@@ -236,7 +249,12 @@ export async function deleteTask(id: number) {
   const me = await requireUser();
   const task = await loadTask(id);
   if (!task || !(await canEditTask(me, task))) redirect(`/tasks/${id}?msg=denied`);
-  await db.delete(schema.tasks).where(eq(schema.tasks.id, id));
+  await db.delete(schema.tasks).where(eq(schema.tasks.id, id)); // its subtasks go with it
+  if (task.parentTaskId) {
+    await syncParentProgress(task.parentTaskId);
+    revalidatePath("/tasks");
+    redirect(`/tasks/${task.parentTaskId}?msg=subdeleted`);
+  }
   revalidatePath("/tasks");
   redirect("/tasks?msg=deleted");
 }

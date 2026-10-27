@@ -488,6 +488,8 @@ export const tasks = pgTable(
     category: taskCategoryEnum("category").default("GENERAL").notNull(),
     meetingId: integer("meeting_id").references(() => meetings.id, { onDelete: "set null" }),
     clientId: integer("client_id").references(() => clients.id, { onDelete: "set null" }),
+    /** Set on a subtask: the task it belongs to (one level only). Deleting the task deletes its subtasks. */
+    parentTaskId: integer("parent_task_id").references((): AnyPgColumn => tasks.id, { onDelete: "cascade" }),
     priority: priorityEnum("priority").default("MEDIUM").notNull(),
     startDate: timestamp("start_date", { mode: "string", withTimezone: false }),
     dueDate: timestamp("due_date", { mode: "string", withTimezone: false }),
@@ -508,6 +510,7 @@ export const tasks = pgTable(
     index("tasks_status_idx").on(t.status),
     index("tasks_client_idx").on(t.clientId),
     index("tasks_source_idx").on(t.sourceBriefId, t.sourcePosition),
+    index("tasks_parent_idx").on(t.parentTaskId),
   ],
 );
 
@@ -538,16 +541,6 @@ export const taskGroups = pgTable(
   },
   (t) => [primaryKey({ columns: [t.taskId, t.groupId] })],
 );
-
-export const taskChecklist = pgTable("task_checklist", {
-  id: serial("id").primaryKey(),
-  taskId: integer("task_id")
-    .notNull()
-    .references(() => tasks.id, { onDelete: "cascade" }),
-  text: varchar("text", { length: 300 }).notNull(),
-  done: boolean("done").default(false).notNull(),
-  position: integer("position").default(0).notNull(),
-});
 
 export const taskComments = pgTable(
   "task_comments",
@@ -586,7 +579,8 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   createdBy: one(users, { fields: [tasks.createdById], references: [users.id] }),
   assignees: many(taskAssignees),
   groups: many(taskGroups),
-  checklist: many(taskChecklist),
+  parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
+  subtasks: many(tasks, { relationName: "subtasks" }),
   comments: many(taskComments),
 }));
 export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({
@@ -597,9 +591,6 @@ export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({
 export const taskGroupsRelations = relations(taskGroups, ({ one }) => ({
   task: one(tasks, { fields: [taskGroups.taskId], references: [tasks.id] }),
   group: one(groups, { fields: [taskGroups.groupId], references: [groups.id] }),
-}));
-export const taskChecklistRelations = relations(taskChecklist, ({ one }) => ({
-  task: one(tasks, { fields: [taskChecklist.taskId], references: [tasks.id] }),
 }));
 export const taskCommentsRelations = relations(taskComments, ({ one }) => ({
   task: one(tasks, { fields: [taskComments.taskId], references: [tasks.id] }),

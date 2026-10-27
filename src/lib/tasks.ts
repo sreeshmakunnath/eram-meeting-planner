@@ -40,7 +40,7 @@ export const CATEGORY_LABEL: Record<TaskCategory, string> = {
 const t = schema.tasks;
 
 /** A task in one of the Admin's business units: its client or meeting is, or its creator or an assignee is a member. */
-export function taskInMyBus(me: SessionUser): SQL {
+function taskInMyBus(me: SessionUser): SQL {
   return or(
     clientInMyBus(me, t.clientId),
     inArray(t.meetingId, db.select({ id: schema.meetings.id }).from(schema.meetings).where(meetingInMyBus(me))),
@@ -49,14 +49,9 @@ export function taskInMyBus(me: SessionUser): SQL {
   )!;
 }
 
-/**
- * Super Admins see every task; BU Admins see the tasks of their business units. Everyone sees tasks they
- * created or are assigned to (directly or through a group they're in).
- */
-export function taskVisibleTo(me: SessionUser): SQL | undefined {
-  if (isSuperAdmin(me)) return undefined;
+/** Tasks the person created or is assigned to (directly or through a group they're in). */
+function myOwnTask(me: SessionUser): SQL {
   return or(
-    isAdmin(me) ? taskInMyBus(me) : undefined,
     eq(t.createdById, me.id),
     exists(
       db
@@ -75,6 +70,21 @@ export function taskVisibleTo(me: SessionUser): SQL | undefined {
           ),
         ),
     ),
+  )!;
+}
+
+/**
+ * Super Admins see every task; BU Admins see the tasks of their business units. Everyone sees tasks they
+ * created or are assigned to (directly or through a group they're in), the subtasks of those tasks, and the
+ * main task of a subtask assigned to them.
+ */
+export function taskVisibleTo(me: SessionUser): SQL | undefined {
+  if (isSuperAdmin(me)) return undefined;
+  return or(
+    isAdmin(me) ? taskInMyBus(me) : undefined,
+    myOwnTask(me),
+    sql`${t.parentTaskId} in (select p.id from tasks p where p.created_by_id = ${me.id} or exists (select 1 from task_assignees pa where pa.task_id = p.id and pa.user_id = ${me.id}))`,
+    sql`exists (select 1 from tasks s join task_assignees sa on sa.task_id = s.id where s.parent_task_id = ${t.id} and sa.user_id = ${me.id})`,
   );
 }
 
@@ -83,16 +93,39 @@ export async function canViewTask(me: SessionUser, id: number) {
   const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, id), taskVisibleTo(me)));
   return !!row;
 }
-/** Editing the task itself: the creator, a Super Admin, or an Admin of the task's business units. */
-export async function canEditTask(me: SessionUser, task: { id: number; createdById: number | null }) {
+type TaskRef = { id: number; createdById: number | null; parentTaskId?: number | null };
+
+/** Editing the task itself: the creator, a Super Admin, an Admin of the task's business units, or (for a subtask) whoever can edit the main task. */
+export async function canEditTask(me: SessionUser, task: TaskRef): Promise<boolean> {
   if (isSuperAdmin(me) || task.createdById === me.id) return true;
-  if (!isAdmin(me)) return false;
-  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), taskInMyBus(me)));
+  if (isAdmin(me)) {
+    const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), taskInMyBus(me)));
+    if (row) return true;
+  }
+  if (task.parentTaskId) {
+    const [parent] = await db.select({ id: t.id, createdById: t.createdById }).from(t).where(eq(t.id, task.parentTaskId));
+    return !!parent && canEditTask(me, parent);
+  }
+  return false;
+}
+/** Updating status / progress / subtasks / comments: whoever can edit it, or its assignees (directly or through a group). */
+export async function canWorkOnTask(me: SessionUser, task: TaskRef) {
+  if (await canEditTask(me, task)) return true;
+  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), myOwnTask(me)));
   return !!row;
 }
-/** Updating status / progress / checklist: whoever can edit it, or anyone who can see it (assignees). */
-export async function canWorkOnTask(me: SessionUser, task: { id: number; createdById: number | null }) {
-  return (await canEditTask(me, task)) || canViewTask(me, task.id);
+
+/** A main task's % complete follows its subtasks (cancelled ones don't count); work on a subtask starts the main task. */
+export async function syncParentProgress(parentId: number) {
+  const subs = await db.select({ status: t.status }).from(t).where(eq(t.parentTaskId, parentId));
+  const counted = subs.filter((s) => s.status !== "CANCELLED");
+  if (!counted.length) return;
+  const [parent] = await db.select({ status: t.status }).from(t).where(eq(t.id, parentId));
+  if (!parent) return;
+  const pct = Math.round((counted.filter((s) => s.status === "COMPLETED").length / counted.length) * 100);
+  const started = counted.some((s) => s.status !== "NOT_STARTED");
+  const status: TaskStatus = parent.status === "NOT_STARTED" && started ? "IN_PROGRESS" : parent.status;
+  await db.update(t).set({ percent: parent.status === "COMPLETED" ? 100 : pct, status }).where(eq(t.id, parentId));
 }
 
 export async function logTaskActivity(taskId: number, userId: number | null, action: string, details?: Record<string, unknown>) {

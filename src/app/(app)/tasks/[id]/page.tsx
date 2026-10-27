@@ -5,14 +5,16 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoSubmitCheckbox } from "@/components/auto-submit-checkbox";
 import { Badge, Empty, fmtDateTime, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
-import { addChecklistItem, addComment, deleteChecklistItem, deleteTask, setTaskStatus, toggleChecklistItem, updateProgress } from "@/lib/actions/tasks";
+import { addComment, addSubtask, deleteTask, setTaskStatus, toggleSubtask, updateProgress } from "@/lib/actions/tasks";
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
-import { canEditTask, canViewTask, CATEGORY_LABEL, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
+import { activeUsers } from "@/lib/queries";
+import { canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Task saved." },
   denied: { tone: "error", text: "Only the creator or an Admin can edit or delete this task." },
+  subdeleted: { tone: "ok", text: "Subtask deleted." },
 };
 
 export default async function TaskPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
@@ -27,15 +29,22 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
       createdBy: { columns: { fullName: true } },
       assignees: { with: { user: { columns: { id: true, fullName: true } }, viaGroup: { columns: { name: true } } } },
       groups: { with: { group: { columns: { id: true, name: true } } } },
-      checklist: { orderBy: (c, { asc }) => [asc(c.position), asc(c.id)] },
+      parent: { columns: { id: true, title: true } },
+      subtasks: {
+        orderBy: (s, { asc }) => [asc(s.createdAt), asc(s.id)],
+        with: { assignees: { with: { user: { columns: { fullName: true } } } } },
+      },
       comments: { orderBy: (c, { asc }) => [asc(c.createdAt)], with: { user: { columns: { fullName: true } } } },
     },
   });
   if (!task) notFound();
   if (!(await canViewTask(me, id))) redirect("/tasks");
   const editable = await canEditTask(me, task);
-  const assigned = task.assignees.some((a) => a.userId === me.id);
-  const canWork = editable || assigned || task.groups.length > 0; // group members reach here only through visibility
+  const canWork = await canWorkOnTask(me, task);
+  const [subtasks, people] = await Promise.all([
+    Promise.all(task.subtasks.map(async (s) => ({ ...s, canWork: await canWorkOnTask(me, s) }))),
+    task.parentTaskId ? Promise.resolve([]) : activeUsers(),
+  ]);
   const activity = await db
     .select({ id: schema.taskActivity.id, at: schema.taskActivity.createdAt, action: schema.taskActivity.action, details: schema.taskActivity.details, user: schema.users.fullName })
     .from(schema.taskActivity)
@@ -66,6 +75,15 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
         }
       />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      {task.parent && (
+        <Notice tone="info">
+          Subtask of{" "}
+          <Link href={`/tasks/${task.parent.id}`} className="underline">
+            {task.parent.title}
+          </Link>
+          . Completing it updates the main task&apos;s progress.
+        </Notice>
+      )}
       {task.sourceBriefId && task.meeting && (
         <Notice tone="info">
           Agreed action from the Meeting Brief of{" "}
@@ -106,42 +124,61 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
             <div className="card whitespace-pre-wrap p-5 text-sm">{task.description}</div>
           )}
 
-          <section className="card p-5">
-            <h2 className="mb-3 font-semibold text-navy">
-              Checklist{" "}
-              {task.checklist.length > 0 && (
-                <span className="font-normal text-slate-500">
-                  ({task.checklist.filter((c) => c.done).length}/{task.checklist.length})
-                </span>
+          {!task.parentTaskId && (
+            <section className="card p-5">
+              <h2 className="mb-3 font-semibold text-navy">
+                Subtasks{" "}
+                {subtasks.length > 0 && (
+                  <span className="font-normal text-slate-500">
+                    ({subtasks.filter((s) => s.status === "COMPLETED").length}/{subtasks.length} done)
+                  </span>
+                )}
+              </h2>
+              {subtasks.length > 0 && (
+                <ul className="mb-3 divide-y divide-slate-100">
+                  {subtasks.map((s) => {
+                    const done = s.status === "COMPLETED";
+                    const late = !!s.dueDate && s.dueDate.slice(0, 10) < todayRiyadh() && OPEN_STATUSES.includes(s.status);
+                    return (
+                      <li key={s.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2 text-sm">
+                        <form action={toggleSubtask.bind(null, s.id, !done)} className="flex min-w-0 items-center gap-2">
+                          <AutoSubmitCheckbox checked={done} disabled={!s.canWork} label={s.title} />
+                          <Link href={`/tasks/${s.id}`} className={`truncate hover:underline ${done ? "text-slate-400 line-through" : s.status === "CANCELLED" ? "text-slate-400" : "text-slate-700"}`}>
+                            {s.title}
+                          </Link>
+                        </form>
+                        <span className="flex items-center gap-3 text-xs text-slate-500">
+                          <span>{s.assignees.map((a) => a.user.fullName).join(", ") || "—"}</span>
+                          <span className={late ? "font-semibold text-red-600" : ""}>{s.dueDate ? fmtPlainDate(s.dueDate) : "no due date"}</span>
+                          {!done && <Badge tone={TASK_STATUS_TONE[s.status]}>{TASK_STATUS_LABEL[s.status]}</Badge>}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
               )}
-            </h2>
-            {task.checklist.length > 0 && (
-              <ul className="mb-3 space-y-1">
-                {task.checklist.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-2 text-sm">
-                    <form action={toggleChecklistItem.bind(null, id, c.id, !c.done)} className="flex items-center gap-2">
-                      <AutoSubmitCheckbox checked={c.done} disabled={!canWork} label={c.text} />
-                      <span className={c.done ? "text-slate-400 line-through" : ""}>{c.text}</span>
-                    </form>
-                    {canWork && (
-                      <form action={deleteChecklistItem.bind(null, id, c.id)}>
-                        <button className="text-xs text-slate-400 hover:text-red-600" aria-label={`Remove ${c.text}`}>
-                          Remove
-                        </button>
-                      </form>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {canWork && (
-              <ActionForm action={addChecklistItem.bind(null, id)} className="flex gap-2">
-                <input name="text" className="input" placeholder="Add a step…" maxLength={300} required />
-                <SubmitButton variant="secondary">Add</SubmitButton>
-              </ActionForm>
-            )}
-            {task.checklist.length > 0 && <p className="mt-2 text-xs text-slate-500">Ticking steps updates the % complete.</p>}
-          </section>
+              {canWork && (
+                <ActionForm action={addSubtask.bind(null, id)} className="grid gap-2 sm:grid-cols-[1fr_12rem_10rem_auto]">
+                  <input name="title" className="input" placeholder="Add a subtask…" maxLength={200} required />
+                  <select name="assigneeId" className="input" defaultValue="" required aria-label="Assign to">
+                    <option value="" disabled>
+                      Assign to…
+                    </option>
+                    {people.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.fullName}
+                      </option>
+                    ))}
+                  </select>
+                  <input name="dueDate" type="date" className="input" defaultValue={task.dueDate?.slice(0, 10) ?? ""} aria-label="Due date" />
+                  <SubmitButton variant="secondary">Add</SubmitButton>
+                </ActionForm>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                Each subtask is a task of its own: the person gets it in their task list with a notification. Completing subtasks updates this task&apos;s % complete.
+              </p>
+            </section>
+          )}
 
           <section className="card">
             <h2 className="border-b border-slate-200 px-5 py-3 font-semibold text-navy">Comments</h2>

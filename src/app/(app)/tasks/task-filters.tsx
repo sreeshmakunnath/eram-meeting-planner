@@ -1,17 +1,15 @@
-import { isAdmin, type SessionUser } from "@/lib/auth";
+import { selectableBus } from "@/lib/access";
+import { isAdmin, isSuperAdmin, type SessionUser } from "@/lib/auth";
 import type { TaskFilters } from "@/lib/task-queries";
 import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
 import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
 /** Shared filter bar for list / board / timeline. */
 export async function TaskFilterBar({ me, f, showBucket = true }: { me: SessionUser; f: TaskFilters; showBucket?: boolean }) {
-  const [users, groups, clients] = await Promise.all([
-    activeUsers(),
-    activeGroups(),
-    clientOptions(me),
-  ]);
+  const [users, groups, clients, units] = await Promise.all([activeUsers(), activeGroups(), clientOptions(me), selectableBus(me)]);
+  const showBu = units.length > 1;
   return (
-    <form className="card mb-4 grid gap-3 p-3 sm:grid-cols-3 lg:grid-cols-8">
+    <form className={`card mb-4 grid gap-3 p-3 sm:grid-cols-3 ${showBu ? "lg:grid-cols-9" : "lg:grid-cols-8"}`}>
       {showBucket && f.bucket && <input type="hidden" name="bucket" value={f.bucket} />}
       <select name="scope" defaultValue={f.scope ?? "mine"} className="input">
         <option value="mine">Assigned to me</option>
@@ -27,6 +25,16 @@ export async function TaskFilterBar({ me, f, showBucket = true }: { me: SessionU
           </option>
         ))}
       </select>
+      {showBu && (
+        <select name="bu" defaultValue={f.bu ?? ""} className="input" title="Tasks assigned to people in this business unit">
+          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
+          {units.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name}
+            </option>
+          ))}
+        </select>
+      )}
       <select name="client" defaultValue={f.client ?? ""} className="input">
         <option value="">Any client</option>
         {clients.map((c) => (
