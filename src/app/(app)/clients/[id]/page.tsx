@@ -6,7 +6,7 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Empty, Field, fmtDateTime, labelize, Notice, PageHeader, statusTone, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
 import { addContact, approveClient, deleteContact, mergeClient, setContactShared, setPrimaryContact } from "@/lib/actions/clients";
-import { canManageClient, canSeeClient, clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import { canApproveClient, canManageClient, canSeeClient, clientVisibleTo, contactVisibleTo } from "@/lib/access";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 import { listMeetings } from "@/lib/meeting-queries";
@@ -20,8 +20,19 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   approved: { tone: "ok", text: "Client approved and now available in dropdowns." },
   merged: { tone: "ok", text: "Duplicate merged into this client; its contacts were moved here." },
   mergefail: { tone: "error", text: "Pick a different client to merge into." },
-  denied: { tone: "error", text: "Only an Admin of this client's business units or the account owner can do that." },
+  denied: { tone: "error", text: "You don't have permission to do that." },
 };
+
+/** "Approved as Manager" plus the approver's remarks. */
+function ApprovalNote({ details }: { details: unknown }) {
+  const d = (details ?? {}) as { as?: string; remarks?: string | null };
+  return (
+    <div className="mt-1 text-xs text-slate-600">
+      {d.as && <span className="text-slate-500">Approved as {d.as}</span>}
+      {d.remarks && <div className="mt-1 rounded border-l-2 border-emerald-300 bg-emerald-50/50 px-2 py-1 text-sm text-slate-700">{d.remarks}</div>}
+    </div>
+  );
+}
 
 export default async function ClientPage({ params, searchParams }: { params: { id: string }; searchParams: { tab?: string; msg?: string } }) {
   const me = await requireUser();
@@ -39,6 +50,8 @@ export default async function ClientPage({ params, searchParams }: { params: { i
     : undefined;
   if (!client || !(await canSeeClient(me, id))) notFound();
   const editable = await canManageClient(me, client);
+  const canApprove = client.status === "PENDING_REVIEW" && (await canApproveClient(me, client));
+  const canMerge = canApprove && isAdmin(me) && editable;
   const owner = alias(schema.users, "owner");
   const contacts = await db
     .select({ contact: schema.clientContacts, owner: owner.fullName })
@@ -59,7 +72,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
   const base = `/clients/${id}`;
 
   const allClients =
-    client.status === "PENDING_REVIEW" && isAdmin(me) && editable
+    canMerge
       ? await db
           .select({ id: schema.clients.id, name: schema.clients.name })
           .from(schema.clients)
@@ -101,27 +114,30 @@ export default async function ClientPage({ params, searchParams }: { params: { i
       />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
 
-      {client.status === "PENDING_REVIEW" && isAdmin(me) && editable && (
+      {canApprove && (
         <div className="card mb-6 border-amber-200 bg-amber-50/50 p-4">
           <div className="mb-3 text-sm text-amber-900">
             Added by {client.createdBy?.fullName ?? "a user"} and waiting for review.
             {possibleDuplicates.length > 0 && <> Possible duplicates: {possibleDuplicates.map((d) => d.name).join(", ")}.</>}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <form action={approveClient.bind(null, id)}>
+            <form action={approveClient.bind(null, id)} className="flex flex-wrap items-center gap-2">
+              <input name="remarks" maxLength={1000} placeholder="Remarks (optional), e.g. checked with the BD team" className="input w-80 max-w-full" />
               <button className="btn-primary">Approve</button>
             </form>
-            <form action={mergeClient.bind(null, id)} className="flex items-center gap-2">
-              <select name="targetId" className="input" defaultValue={possibleDuplicates[0]?.id ?? ""} required>
-                <option value="">Merge into…</option>
-                {allClients.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              <button className="btn-secondary">Merge</button>
-            </form>
+            {canMerge && (
+              <form action={mergeClient.bind(null, id)} className="flex items-center gap-2">
+                <select name="targetId" className="input" defaultValue={possibleDuplicates[0]?.id ?? ""} required>
+                  <option value="">Merge into…</option>
+                  {allClients.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn-secondary">Merge</button>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -348,7 +364,11 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                         </span>
                         <span className="whitespace-nowrap text-xs text-slate-500">{fmtDateTime(a.at)}</span>
                       </div>
-                      {a.details != null && <div className="mt-1 font-mono text-xs text-slate-500">{JSON.stringify(a.details)}</div>}
+                      {a.action === "CLIENT_APPROVED" ? (
+                        <ApprovalNote details={a.details} />
+                      ) : (
+                        a.details != null && <div className="mt-1 font-mono text-xs text-slate-500">{JSON.stringify(a.details)}</div>
+                      )}
                     </li>
                   ))}
                 </ul>

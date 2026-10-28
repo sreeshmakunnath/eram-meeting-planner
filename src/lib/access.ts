@@ -43,12 +43,18 @@ export async function teamIds(userId: number) {
   return res.rows.map((r) => Number(r.id));
 }
 
-/** Clients the user can see: their business units' clients, and clients they own or created. */
+/** Clients the user can see: their business units' clients, clients they own or created, and those their team owns or created. */
 export function clientVisibleTo(me: SessionUser): SQL | undefined {
   if (isSuperAdmin(me)) return undefined;
   const c = schema.clients;
-  return or(clientInMyBus(me, c.id), eq(c.accountOwnerId, me.id), eq(c.createdById, me.id));
+  return or(clientInMyBus(me, c.id), eq(c.accountOwnerId, me.id), eq(c.createdById, me.id), clientOfMyTeam(me));
 }
+
+/** The client was added by, or is owned by, someone under me in the reporting lines. */
+export const clientOfMyTeam = (me: SessionUser) => {
+  const c = schema.clients;
+  return or(sql`${c.createdById} in ${teamOf(me.id)}`, sql`${c.accountOwnerId} in ${teamOf(me.id)}`)!;
+};
 
 export async function canSeeClient(me: SessionUser, clientId: number) {
   const [row] = await db
@@ -67,6 +73,16 @@ export async function canManageClient(me: SessionUser, client: { id: number; acc
     .from(schema.clients)
     .where(and(eq(schema.clients.id, client.id), clientInMyBus(me, schema.clients.id)));
   return !!row;
+}
+
+/**
+ * Approve a pending client: Super Admin, an Admin of one of its business units, or a manager (at any level) of
+ * the person who added it or owns it. Managers don't need an Admin role: their reach is their team.
+ */
+export async function canApproveClient(me: SessionUser, client: { id: number; createdById: number | null; accountOwnerId: number | null }) {
+  if (isAdmin(me) && (await canManageClient(me, { id: client.id, accountOwnerId: null }))) return true;
+  const team = await teamIds(me.id);
+  return [client.createdById, client.accountOwnerId].some((u) => u != null && team.includes(u));
 }
 
 /**

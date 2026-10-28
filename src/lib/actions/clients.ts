@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { canManageClient, canManageContact, canSeeClient, mergeBuIds } from "@/lib/access";
+import { canApproveClient, canManageClient, canManageContact, canSeeClient, mergeBuIds } from "@/lib/access";
 import { isAdmin, requireAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { assertClientName, clientNameMatches, type ClientNameMatches } from "@/lib/client-names";
@@ -77,11 +77,14 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
   redirect(`/clients/${id}?msg=saved`);
 }
 
-export async function approveClient(id: number) {
-  const admin = await requireAdmin();
-  if (!(await canManageClient(admin, { id, accountOwnerId: null }))) redirect(`/clients/${id}?msg=denied`);
+/** Admins of the client's business units, or managers of whoever added or owns it. Remarks go to the activity log. */
+export async function approveClient(id: number, fd: FormData) {
+  const me = await requireUser();
+  const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
+  if (!client || client.status !== "PENDING_REVIEW" || !(await canApproveClient(me, client))) redirect(`/clients/${id}?msg=denied`);
+  const asAdmin = isAdmin(me) && (await canManageClient(me, { id, accountOwnerId: null }));
   await db.update(schema.clients).set({ status: "ACTIVE" }).where(eq(schema.clients.id, id));
-  await audit(admin.id, "CLIENT_APPROVED", "client", id);
+  await audit(me.id, "CLIENT_APPROVED", "client", id, { as: asAdmin ? "Admin" : "Manager", remarks: str(fd, "remarks")?.slice(0, 1000) ?? null });
   revalidatePath("/clients");
   redirect(`/clients/${id}?msg=approved`);
 }

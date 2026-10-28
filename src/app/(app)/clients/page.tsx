@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Badge, Empty, labelize, PageHeader, statusTone } from "@/components/ui";
 import { db, schema } from "@/db";
 import { countActive, FilterBar, FilterField } from "@/components/filters";
-import { clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import { clientOfMyTeam, clientVisibleTo, contactVisibleTo } from "@/lib/access";
 import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
 import { activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES } from "@/lib/queries";
 
@@ -48,7 +48,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
       .where(where.length ? and(...where) : undefined)
       .orderBy(asc(clients.name)),
     activeUsers(),
-    db.select({ pending: sql<number>`count(*)`.mapWith(Number) }).from(clients).where(and(eq(clients.status, "PENDING_REVIEW"), visible)),
+    db.select({ pending: sql<number>`count(*)`.mapWith(Number) }).from(clients).where(and(eq(clients.status, "PENDING_REVIEW"), isAdmin(me) ? visible : clientOfMyTeam(me))), // managers: their team's
     db
       .select({ id: schema.businessUnits.id, name: schema.businessUnits.name })
       .from(schema.businessUnits)
@@ -79,7 +79,7 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           </>
         }
       />
-      {isAdmin(me) && pending > 0 && status !== "PENDING_REVIEW" && (
+      {pending > 0 && status !== "PENDING_REVIEW" && (
         <Link href="/clients?status=PENDING_REVIEW" className="mb-4 block rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 hover:bg-amber-100">
           {pending} client{pending === 1 ? "" : "s"} waiting for review →
         </Link>
