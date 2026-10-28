@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { RegisterServiceWorker } from "@/components/register-sw";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,12 +14,19 @@ export const metadata: Metadata = {
     ],
     apple: { url: "/eram-workforce-app-icon-512.png", sizes: "512x512" },
   },
+  // Installed on an iPhone home screen: open full screen, with a short name under the icon.
+  appleWebApp: { capable: true, title: "ERAM Planner", statusBarStyle: "default" },
 };
+
+export const viewport: Viewport = { themeColor: "#1F3864", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <RegisterServiceWorker />
+      </body>
     </html>
   );
 }
