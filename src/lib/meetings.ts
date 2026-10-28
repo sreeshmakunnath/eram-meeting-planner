@@ -1,6 +1,6 @@
 import { and, eq, exists, inArray, not, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { clientInMyBus } from "./access";
+import { clientInMyBus, teamOf } from "./access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 
 // ---------- labels ----------
@@ -80,44 +80,30 @@ export function meetingInMyBus(me: SessionUser): SQL {
 }
 
 /**
- * Super Admins see every meeting. Everyone else sees meetings of their business units, plus meetings they
- * organise, attend (directly or via a group), own the next action of, or own an agreed action on its brief.
+ * Meetings these people organise, attend (directly or via a group), own the next action of, or own an agreed
+ * action on its brief (the person, or a member of the owning group). `people` is a parenthesised id list or subquery.
+ */
+function involving(people: SQL): SQL {
+  const m = schema.meetings;
+  return or(
+    sql`${m.organiserId} in ${people}`,
+    sql`exists (select 1 from meeting_attendees ma where ma.meeting_id = ${m.id} and ma.user_id in ${people})`,
+    sql`exists (select 1 from meeting_action_owners mo where mo.meeting_id = ${m.id} and mo.user_id in ${people})`,
+    sql`exists (select 1 from brief_actions ba join meeting_briefs b on b.id = ba.brief_id where b.meeting_id = ${m.id}
+      and (ba.owner_user_id in ${people} or ba.owner_group_id in (select gm.group_id from group_members gm where gm.user_id in ${people})))`,
+  )!;
+}
+
+/** Meetings this one person is involved in (for "my" numbers, which leave out a manager's team). */
+export const involves = (userId: number) => involving(sql`(${userId})`);
+
+/**
+ * Super Admins see every meeting; BU Admins see all meetings of their business units. Everyone sees meetings
+ * they're involved in, and managers also see the meetings their reportees (at any depth) are involved in.
  */
 export function visibleTo(me: SessionUser): SQL | undefined {
   if (isSuperAdmin(me)) return undefined;
-  const m = schema.meetings;
-  return or(
-    meetingInMyBus(me),
-    eq(m.organiserId, me.id),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(schema.meetingAttendees)
-        .where(and(eq(schema.meetingAttendees.meetingId, m.id), eq(schema.meetingAttendees.userId, me.id))),
-    ),
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(schema.meetingActionOwners)
-        .where(and(eq(schema.meetingActionOwners.meetingId, m.id), eq(schema.meetingActionOwners.userId, me.id))),
-    ),
-    // Owners of an agreed action in the meeting's brief — the person, or a member of the owning group
-    exists(
-      db
-        .select({ one: sql`1` })
-        .from(schema.briefActions)
-        .innerJoin(schema.meetingBriefs, eq(schema.briefActions.briefId, schema.meetingBriefs.id))
-        .where(
-          and(
-            eq(schema.meetingBriefs.meetingId, m.id),
-            or(
-              eq(schema.briefActions.ownerUserId, me.id),
-              sql`${schema.briefActions.ownerGroupId} in (select gm.group_id from group_members gm where gm.user_id = ${me.id})`,
-            ),
-          ),
-        ),
-    ),
-  );
+  return or(isAdmin(me) ? meetingInMyBus(me) : undefined, involving(sql`(${me.id})`), involving(teamOf(me.id)));
 }
 
 export async function canView(me: SessionUser, meetingId: number) {

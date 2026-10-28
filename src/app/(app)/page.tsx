@@ -4,7 +4,7 @@ import { fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@/components/ui
 import { db, schema } from "@/db";
 import { clientVisibleTo, scopeToBu, selectableBus } from "@/lib/access";
 import { recentActivity } from "@/lib/activity-feed";
-import { taskStats } from "@/lib/task-stats";
+import { taskStats, teamTaskStats } from "@/lib/task-stats";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
@@ -14,7 +14,7 @@ import { TaskMiniList } from "@/components/task-mini-list";
 import { BuTable, KpiTile, MonthColumns, OrderedBars, StackedShare } from "@/components/dashboard-charts";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
 import { orgStats } from "@/lib/org-stats";
-import { fmtDay, fmtTime, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
+import { fmtDay, fmtTime, involves, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
 
 function Tile({ label, value, href }: { label: string; value: number | string; href?: string }) {
   const body = (
@@ -54,27 +54,28 @@ export default async function Dashboard({ searchParams }: { searchParams: { deni
 
 async function MyWork({ me }: { me: SessionUser }) {
   const personal = { ...me, role: "USER" as const }; // "my" numbers, even for Admins
+  const mine = involves(me.id); // and without a manager's team
   const today = todayRiyadh();
   const dow = new Date(`${today}T00:00:00Z`).getUTCDay();
   const weekStart = riyadh(new Date(Date.parse(`${today}T00:00:00Z`) - dow * 86400_000).toISOString().slice(0, 10), "00:00");
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
   const now = new Date();
-  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen] = await Promise.all([
+  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team] = await Promise.all([
     db
       .select({ id: schema.groups.id, name: schema.groups.name })
       .from(schema.groupMembers)
       .innerJoin(schema.groups, eq(schema.groupMembers.groupId, schema.groups.id))
       .where(eq(schema.groupMembers.userId, me.id))
       .orderBy(asc(schema.groups.name)),
-    meetingsBetween(personal, weekStart, weekEnd, notInArray(m.status, ["CANCELLED"])),
-    meetingsBetween(personal, now, new Date(now.getTime() + 7 * 86400_000), inArray(m.status, ["SCHEDULED", "CONFIRMED"])),
+    meetingsBetween(personal, weekStart, weekEnd, and(mine, notInArray(m.status, ["CANCELLED"]))),
+    meetingsBetween(personal, now, new Date(now.getTime() + 7 * 86400_000), and(mine, inArray(m.status, ["SCHEDULED", "CONFIRMED"]))),
     db
       .select({ n: count })
       .from(m)
       .leftJoin(schema.meetingBriefs, eq(schema.meetingBriefs.meetingId, m.id))
       .where(
         and(
-          visibleTo(personal),
+          mine,
           lt(m.startAt, now),
           notInArray(m.status, ["CANCELLED", "POSTPONED", "TO_BE_SCHEDULED"]),
           or(isNull(schema.meetingBriefs.id), eq(schema.meetingBriefs.status, "DRAFT")),
@@ -95,6 +96,7 @@ async function MyWork({ me }: { me: SessionUser }) {
         ),
       ),
     listTasks(personal, { scope: "mine", bucket: "open" }, 1000),
+    teamTaskStats(me),
   ]);
   const myOverdue = myOpen.filter((t) => t.overdue);
   const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
@@ -170,6 +172,55 @@ async function MyWork({ me }: { me: SessionUser }) {
           )}
         </section>
       </div>
+      {team.length > 0 && (
+        <section className="card mt-4 p-4">
+          <div className="mb-2 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">My team</h3>
+            <Link href="/tasks?scope=team&bucket=open" className="link text-sm">
+              All team tasks →
+            </Link>
+          </div>
+          <div className="max-h-[16rem] overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-4">Person</th>
+                  <th className="py-2 pr-4 text-right">Open tasks</th>
+                  <th className="py-2 pr-4 text-right">Overdue</th>
+                  <th className="py-2 text-right">Completed</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {team.map((p) => (
+                  <tr key={p.id} className="hover:bg-slate-50">
+                    <td className="py-1.5 pr-4 font-medium text-slate-700">
+                      {p.name}
+                      {!p.direct && <span className="ml-2 text-xs font-normal text-slate-400">via a reportee</span>}
+                    </td>
+                    {(
+                      [
+                        ["open", p.open, "text-navy"],
+                        ["overdue", p.overdue, "text-red-600"],
+                        ["completed", p.completed, "text-emerald-700"],
+                      ] as const
+                    ).map(([bucket, v, tone]) => (
+                      <td key={bucket} className={`py-1.5 text-right tabular-nums ${bucket === "completed" ? "" : "pr-4"}`}>
+                        {v ? (
+                          <Link href={`/tasks?scope=all&bucket=${bucket}&user=${p.id}`} className={`font-semibold hover:underline ${tone}`}>
+                            {v}
+                          </Link>
+                        ) : (
+                          <span className="text-slate-400">0</span>
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </>
   );
 }

@@ -25,6 +25,24 @@ export const userInMyBus = (me: SessionUser, userId: AnyPgColumn) =>
       .where(and(eq(schema.userBusinessUnits.userId, userId), inArray(schema.userBusinessUnits.businessUnitId, me.buIds))),
   );
 
+/**
+ * Everyone under this person in the reporting lines (their reportees, their reportees' reportees…), as a
+ * parenthesised id subquery. UNION stops at loops, so a wrongly circular line can't hang the query.
+ */
+export const teamOf = (userId: number): SQL => sql`(
+  with recursive team(id) as (
+    select um.user_id from user_managers um where um.manager_id = ${userId}
+    union
+    select um.user_id from user_managers um join team on um.manager_id = team.id
+  )
+  select id from team where id <> ${userId}
+)`;
+
+export async function teamIds(userId: number) {
+  const res = await db.execute<{ id: number }>(sql`select id from ${teamOf(userId)} as t(id)`);
+  return res.rows.map((r) => Number(r.id));
+}
+
 /** Clients the user can see: their business units' clients, and clients they own or created. */
 export function clientVisibleTo(me: SessionUser): SQL | undefined {
   if (isSuperAdmin(me)) return undefined;

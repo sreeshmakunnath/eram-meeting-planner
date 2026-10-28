@@ -5,7 +5,7 @@ import { CheckboxList } from "@/components/checkbox-list";
 import { Field } from "@/components/ui";
 import { db, schema } from "@/db";
 import type { User } from "@/db/schema";
-import { allowedBuIds } from "@/lib/access";
+import { allowedBuIds, teamIds } from "@/lib/access";
 import { isSuperAdmin, type SessionUser } from "@/lib/auth";
 import { activeBranches, activeBusinessUnits, activeGroups, activeUsers } from "@/lib/queries";
 
@@ -15,12 +15,14 @@ export async function UserForm({
   user,
   groupIds = [],
   buIds = [],
+  managerIds = [],
 }: {
   me: SessionUser;
   action: (s: ActionState, fd: FormData) => Promise<ActionState>;
   user?: User;
   groupIds?: number[];
   buIds?: number[];
+  managerIds?: number[];
 }) {
   const [branches, allBus, allUsers, groups] = await Promise.all([activeBranches(), activeBusinessUnits(), activeUsers(), activeGroups()]);
   // BU Admins grant only their own units; the user's other units are listed and kept on save.
@@ -33,10 +35,11 @@ export async function UserForm({
     ? await db.select().from(schema.businessUnits).where(eq(schema.businessUnits.id, user.businessUnitId))
     : [];
   const buOptions = [...bus, ...current.map((b) => ({ ...b, name: b.active ? b.name : `${b.name} (inactive)` }))];
-  // Reporting manager: people in the Admin's units (plus the current manager)
-  const users = isSuperAdmin(me)
-    ? allUsers
-    : allUsers.filter((u) => u.buIds.some((b) => me.buIds.includes(b)) || u.id === user?.managerId);
+  // Reporting managers: people in the Admin's units (plus the current managers), never the user or anyone under them
+  const below = user ? await teamIds(user.id) : [];
+  const managers = (isSuperAdmin(me) ? allUsers : allUsers.filter((u) => u.buIds.some((b) => me.buIds.includes(b)) || managerIds.includes(u.id))).filter(
+    (u) => u.id !== user?.id && !below.includes(u.id),
+  );
   return (
     <ActionForm action={action} className="card p-6">
       {user && <input type="hidden" name="id" value={user.id} />}
@@ -86,18 +89,11 @@ export async function UserForm({
         <Field label="Mobile number" hint="e.g. +966 5X XXX XXXX">
           <input name="mobile" className="input" defaultValue={user?.mobile ?? ""} maxLength={20} />
         </Field>
-        <Field label="Reporting manager">
-          <select name="managerId" className="input" defaultValue={user?.managerId ?? ""}>
-            <option value="">—</option>
-            {users
-              .filter((u) => u.id !== user?.id)
-              .map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.fullName}
-                </option>
-              ))}
-          </select>
-        </Field>
+        <div className="md:row-span-2">
+          <span className="label">Reporting managers</span>
+          <CheckboxList name="managerIds" options={managers.map((u) => ({ id: u.id, label: u.fullName }))} selected={managerIds} empty="No one to pick yet." />
+          <p className="mt-1 text-xs text-slate-500">One or more. Managers see this person&apos;s tasks and meetings (and those of anyone under them).</p>
+        </div>
         <Field
           label={user ? "New password" : "Password"}
           hint={

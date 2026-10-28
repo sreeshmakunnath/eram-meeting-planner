@@ -1,9 +1,9 @@
 import { and, eq, exists, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { clientInMyBus, userInMyBus } from "./access";
+import { teamOf } from "./access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 import { appUrl, button, esc, sendMail } from "./mail";
-import { fmtPlainDate, meetingInMyBus } from "./meetings";
+import { fmtPlainDate } from "./meetings";
 import { notify } from "./notifications";
 
 export const TASK_STATUSES = ["NOT_STARTED", "STARTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"] as const;
@@ -39,14 +39,9 @@ export const CATEGORY_LABEL: Record<TaskCategory, string> = {
 
 const t = schema.tasks;
 
-/** A task in one of the Admin's business units: its client or meeting is, or its creator or an assignee is a member. */
+/** A task in one of the Admin's business units (every task belongs to exactly one). */
 function taskInMyBus(me: SessionUser): SQL {
-  return or(
-    clientInMyBus(me, t.clientId),
-    inArray(t.meetingId, db.select({ id: schema.meetings.id }).from(schema.meetings).where(meetingInMyBus(me))),
-    userInMyBus(me, t.createdById),
-    exists(db.select({ one: sql`1` }).from(schema.taskAssignees).where(and(eq(schema.taskAssignees.taskId, t.id), userInMyBus(me, schema.taskAssignees.userId)))),
-  )!;
+  return inArray(t.businessUnitId, me.buIds);
 }
 
 /** Tasks the person created or is assigned to (directly or through a group they're in). */
@@ -73,16 +68,27 @@ function myOwnTask(me: SessionUser): SQL {
   )!;
 }
 
+/** Tasks created by or assigned to someone under this manager in the reporting lines (any depth). */
+function myTeamTask(me: SessionUser): SQL {
+  const team = teamOf(me.id);
+  return sql`(${t.createdById} in ${team} or exists (select 1 from task_assignees ta where ta.task_id = ${t.id} and ta.user_id in ${team}))`;
+}
+
+/** Assigned to someone under this manager. */
+export const assignedToMyTeam = (me: SessionUser): SQL =>
+  sql`exists (select 1 from task_assignees ta where ta.task_id = ${t.id} and ta.user_id in ${teamOf(me.id)})`;
+
 /**
  * Super Admins see every task; BU Admins see the tasks of their business units. Everyone sees tasks they
  * created or are assigned to (directly or through a group they're in), the subtasks of those tasks, and the
- * main task of a subtask assigned to them.
+ * main task of a subtask assigned to them. Managers also see their reportees' tasks.
  */
 export function taskVisibleTo(me: SessionUser): SQL | undefined {
   if (isSuperAdmin(me)) return undefined;
   return or(
     isAdmin(me) ? taskInMyBus(me) : undefined,
     myOwnTask(me),
+    myTeamTask(me),
     sql`${t.parentTaskId} in (select p.id from tasks p where p.created_by_id = ${me.id} or exists (select 1 from task_assignees pa where pa.task_id = p.id and pa.user_id = ${me.id}))`,
     sql`exists (select 1 from tasks s join task_assignees sa on sa.task_id = s.id where s.parent_task_id = ${t.id} and sa.user_id = ${me.id})`,
   );
@@ -112,6 +118,13 @@ export async function canEditTask(me: SessionUser, task: TaskRef): Promise<boole
 export async function canWorkOnTask(me: SessionUser, task: TaskRef) {
   if (await canEditTask(me, task)) return true;
   const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), myOwnTask(me)));
+  return !!row;
+}
+
+/** Comments: whoever can work on the task, and managers of the people on it (they view and comment, nothing more). */
+export async function canCommentOnTask(me: SessionUser, task: TaskRef) {
+  if (await canWorkOnTask(me, task)) return true;
+  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), myTeamTask(me)));
   return !!row;
 }
 

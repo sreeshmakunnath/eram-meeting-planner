@@ -1,4 +1,4 @@
-import { and, desc, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { CheckboxList } from "@/components/checkbox-list";
@@ -6,6 +6,7 @@ import { Field } from "@/components/ui";
 import { db, schema } from "@/db";
 import type { Task } from "@/db/schema";
 import { saveTask } from "@/lib/actions/tasks";
+import { selectableBus } from "@/lib/access";
 import type { SessionUser } from "@/lib/auth";
 import { fmtPlainDate, riyadhParts, visibleTo } from "@/lib/meetings";
 import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
@@ -24,7 +25,7 @@ export async function TaskForm({
   groupIds?: number[];
   defaults?: { meetingId?: number | null; clientId?: number | null; title?: string; category?: string };
 }) {
-  const [users, groups, clients, meetings] = await Promise.all([
+  const [users, groups, clients, meetings, myBus] = await Promise.all([
     activeUsers(),
     activeGroups(),
     clientOptions(me, task?.clientId ?? defaults.clientId),
@@ -34,7 +35,13 @@ export async function TaskForm({
       .where(and(visibleTo(me), isNotNull(schema.meetings.id)))
       .orderBy(desc(schema.meetings.createdAt))
       .limit(200),
+    selectableBus(me),
   ]);
+  // The task's current unit stays selectable even if it isn't one of the editor's
+  const current = task && !myBus.some((b) => b.id === task.businessUnitId)
+    ? await db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.id, task.businessUnitId))
+    : [];
+  const buOptions = [...myBus, ...current];
   const v = { ...defaults, ...task };
   return (
     <ActionForm action={saveTask} className="card p-6">
@@ -85,6 +92,16 @@ export async function TaskForm({
             {clients.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Business unit *" hint="BU filters, dashboards and BU Admins use this.">
+          <select name="businessUnitId" className="input" defaultValue={task?.businessUnitId ?? ""}>
+            <option value="">Automatic (from the client or meeting)</option>
+            {buOptions.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
               </option>
             ))}
           </select>

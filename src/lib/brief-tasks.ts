@@ -4,6 +4,7 @@
 import { and, eq, inArray, isNotNull, notInArray } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "../db/schema";
+import { taskBuFor } from "./task-bu";
 
 type Db = NodePgDatabase<typeof schema>;
 
@@ -79,9 +80,11 @@ export async function syncBriefTasks(db: Db, briefId: number, actorId: number | 
       }
       continue;
     }
+    const createdById = brief.submittedById ?? actorId ?? m.organiserId;
     const [task] = await db
       .insert(schema.tasks)
       .values({
+        businessUnitId: await taskBuFor(db, { clientId: m.clientId, meetingId: m.id, userId: createdById }),
         title,
         description: `Agreed action from the Meeting Brief of "${m.title}".`,
         // GENERAL keeps brief actions apart from the BD Target Schedule categories
@@ -94,7 +97,7 @@ export async function syncBriefTasks(db: Db, briefId: number, actorId: number | 
         sourceBriefId: briefId,
         sourcePosition: a.position,
         sourceActionId: a.id,
-        createdById: brief.submittedById ?? actorId ?? m.organiserId,
+        createdById,
       })
       .returning();
     const userIds = await setAssignees(db, task.id, a.ownerUserId, a.ownerGroupId);

@@ -66,7 +66,6 @@ export const users = pgTable(
       .references(() => businessUnits.id),
     designation: varchar("designation", { length: 100 }),
     mobile: varchar("mobile", { length: 20 }),
-    managerId: integer("manager_id").references((): AnyPgColumn => users.id),
     status: userStatusEnum("status").default("ACTIVE").notNull(),
     passwordHash: text("password_hash"),
     failedLogins: integer("failed_logins").default(0).notNull(),
@@ -92,6 +91,23 @@ export const userBusinessUnits = pgTable(
       .references(() => businessUnits.id, { onDelete: "cascade" }),
   },
   (t) => [primaryKey({ columns: [t.userId, t.businessUnitId] }), index("user_business_units_bu_idx").on(t.businessUnitId)],
+);
+
+/**
+ * Reporting lines: a user can have several managers. Managers see the tasks and meetings of everyone under
+ * them (reportees' reportees too). No separate role: anyone with reportees is a manager.
+ */
+export const userManagers = pgTable(
+  "user_managers",
+  {
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    managerId: integer("manager_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.managerId] }), index("user_managers_manager_idx").on(t.managerId)],
 );
 
 export const groups = pgTable("groups", {
@@ -216,7 +232,6 @@ export const businessUnitsRelations = relations(businessUnits, ({ many }) => ({
 export const usersRelations = relations(users, ({ one, many }) => ({
   branch: one(branches, { fields: [users.branchId], references: [branches.id] }),
   businessUnit: one(businessUnits, { fields: [users.businessUnitId], references: [businessUnits.id] }),
-  manager: one(users, { fields: [users.managerId], references: [users.id], relationName: "manager" }),
   memberships: many(groupMembers),
   businessUnits: many(userBusinessUnits),
 }));
@@ -490,6 +505,10 @@ export const tasks = pgTable(
     clientId: integer("client_id").references(() => clients.id, { onDelete: "set null" }),
     /** Set on a subtask: the task it belongs to (one level only). Deleting the task deletes its subtasks. */
     parentTaskId: integer("parent_task_id").references((): AnyPgColumn => tasks.id, { onDelete: "cascade" }),
+    /** The one business unit the task belongs to: drives BU filters, dashboards and BU Admin visibility. */
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id),
     priority: priorityEnum("priority").default("MEDIUM").notNull(),
     startDate: timestamp("start_date", { mode: "string", withTimezone: false }),
     dueDate: timestamp("due_date", { mode: "string", withTimezone: false }),
@@ -511,6 +530,7 @@ export const tasks = pgTable(
     index("tasks_client_idx").on(t.clientId),
     index("tasks_source_idx").on(t.sourceBriefId, t.sourcePosition),
     index("tasks_parent_idx").on(t.parentTaskId),
+    index("tasks_bu_idx").on(t.businessUnitId),
   ],
 );
 
@@ -580,6 +600,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   assignees: many(taskAssignees),
   groups: many(taskGroups),
   parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
+  businessUnit: one(businessUnits, { fields: [tasks.businessUnitId], references: [businessUnits.id] }),
   subtasks: many(tasks, { relationName: "subtasks" }),
   comments: many(taskComments),
 }));

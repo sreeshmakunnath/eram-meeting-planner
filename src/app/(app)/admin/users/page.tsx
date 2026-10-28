@@ -2,6 +2,7 @@ import { and, asc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, fmtDateTime, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
+import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { userInMyBus } from "@/lib/access";
 import { isSuperAdmin, requireAdmin } from "@/lib/auth";
 import { activeBusinessUnits } from "@/lib/queries";
@@ -56,31 +57,36 @@ export default async function UsersPage({ searchParams }: { searchParams: Search
         }
       />
       {searchParams.msg === "denied" && <Notice tone="error">You can only manage users in your business units.</Notice>}
-      <form className="card mb-4 grid gap-3 p-4 md:grid-cols-5">
-        <input name="q" defaultValue={searchParams.q} placeholder="Search name, email, username, employee ID" className="input md:col-span-2" />
-        <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
-          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
-          {buList.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        <select name="role" defaultValue={searchParams.role ?? ""} className="input">
-          <option value="">All roles</option>
-          <option value="SUPER_ADMIN">Super Admin</option>
-          <option value="ADMIN">Admin</option>
-          <option value="USER">User</option>
-        </select>
-        <div className="flex gap-2">
+<FilterBar clearHref="/admin/users" active={countActive(searchParams, ["q", "bu", "role", "status"])}>
+        <FilterField label="Search" size="lg">
+          <input name="q" defaultValue={searchParams.q} placeholder="Name, email, username or employee ID" className="input" />
+        </FilterField>
+        <FilterField label="Business unit">
+          <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
+            <option value="">All</option>
+            {buList.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Role" size="sm">
+          <select name="role" defaultValue={searchParams.role ?? ""} className="input">
+            <option value="">Any</option>
+            <option value="SUPER_ADMIN">Super Admin</option>
+            <option value="ADMIN">Admin</option>
+            <option value="USER">User</option>
+          </select>
+        </FilterField>
+        <FilterField label="Status" size="sm">
           <select name="status" defaultValue={searchParams.status ?? ""} className="input">
-            <option value="">Any status</option>
+            <option value="">Any</option>
             <option value="ACTIVE">Active</option>
             <option value="INACTIVE">Inactive</option>
           </select>
-          <button className="btn-secondary">Filter</button>
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (
           <Empty>No users match these filters.</Empty>

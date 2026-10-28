@@ -5,12 +5,14 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { canSeeClient } from "@/lib/access";
-import { requireUser, type SessionUser } from "@/lib/auth";
+import { isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
+import { taskBuFor } from "@/lib/task-bu";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { notify } from "@/lib/notifications";
 import { PRIORITIES } from "@/lib/meetings";
 import {
+  canCommentOnTask,
   canEditTask,
   canWorkOnTask,
   expandAssignees,
@@ -79,6 +81,7 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
       category: pick(TASK_CATEGORIES, str(fd, "category"), "GENERAL"),
       meetingId: int(fd, "meetingId"),
       clientId: int(fd, "clientId"),
+      businessUnitId: int(fd, "businessUnitId") ?? 0, // 0 = automatic, worked out below
       priority: pick(PRIORITIES, str(fd, "priority"), "MEDIUM"),
       startDate: str(fd, "startDate"),
       dueDate: str(fd, "dueDate"),
@@ -96,6 +99,11 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
       const [m] = await db.select({ clientId: schema.meetings.clientId }).from(schema.meetings).where(eq(schema.meetings.id, data.meetingId));
       data.clientId = m?.clientId ?? null;
     }
+
+    // Business unit: one of the person's own (or the one already on the task), or automatic from the client / meeting
+    if (data.businessUnitId && !isSuperAdmin(me) && !me.buIds.includes(data.businessUnitId) && data.businessUnitId !== before?.businessUnitId)
+      throw new FormError("Pick one of your business units.");
+    if (!data.businessUnitId) data.businessUnitId = await taskBuFor(db, { clientId: data.clientId, meetingId: data.meetingId, userId: me.id });
 
     const individual = !before && fd.get("groupMode") === "INDIVIDUAL" && groupIds.length > 0;
     const wanted = await expandAssignees(userIds, groupIds);
@@ -188,7 +196,7 @@ export async function addSubtask(parentId: number, _: ActionState, fd: FormData)
     const dueDate = str(fd, "dueDate") ?? parent.dueDate;
     const [sub] = await db
       .insert(schema.tasks)
-      .values({ title, category: "GENERAL", parentTaskId: parentId, clientId: parent.clientId, meetingId: parent.meetingId, priority: parent.priority, dueDate, createdById: me.id })
+      .values({ title, category: "GENERAL", parentTaskId: parentId, businessUnitId: parent.businessUnitId, clientId: parent.clientId, meetingId: parent.meetingId, priority: parent.priority, dueDate, createdById: me.id })
       .returning();
     await db.insert(schema.taskAssignees).values({ taskId: sub.id, userId: assignee.id });
     await logTaskActivity(sub.id, me.id, "CREATED", { subtaskOf: parent.title });
@@ -218,7 +226,7 @@ export async function addComment(id: number, _: ActionState, fd: FormData): Prom
   try {
     const me = await requireUser();
     const task = await loadTask(id);
-    if (!task || !(await canWorkOnTask(me, task))) throw new FormError("You can't comment on this task.");
+    if (!task || !(await canCommentOnTask(me, task))) throw new FormError("You can't comment on this task.");
     const body = req(fd, "body", "Comment");
     await db.insert(schema.taskComments).values({ taskId: id, userId: me.id, body });
     const handles = [...body.matchAll(/@([\p{L}0-9._-]+)/gu)].map((m) => m[1].toLowerCase());

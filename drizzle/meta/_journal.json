@@ -64,6 +64,20 @@
       "when": 1793104596870,
       "tag": "0008_subtasks",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793165142659,
+      "tag": "0009_task_business_unit",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793166328315,
+      "tag": "0010_multiple_managers",
+      "breakpoints": true
     }
   ]
 }

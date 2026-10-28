@@ -24,7 +24,11 @@ export default async function EditUserPage({ params, searchParams }: { params: {
   const [user] = Number.isInteger(id) ? await db.select().from(schema.users).where(eq(schema.users.id, id)) : [];
   if (!user) notFound();
   if (!(await canManageUser(me, id))) redirect("/admin/users?msg=denied");
-  const [memberships, buIds] = await Promise.all([db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, id)), userBuIds(id)]);
+  const [memberships, buIds, managers] = await Promise.all([
+    db.select().from(schema.groupMembers).where(eq(schema.groupMembers.userId, id)),
+    userBuIds(id),
+    db.select({ id: schema.userManagers.managerId }).from(schema.userManagers).where(eq(schema.userManagers.userId, id)),
+  ]);
   const locked = user.lockedUntil && user.lockedUntil > new Date();
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
 
@@ -57,7 +61,7 @@ export default async function EditUserPage({ params, searchParams }: { params: {
           </button>
         </form>
       </div>
-      <UserForm me={me} action={updateUser} user={user} groupIds={memberships.map((m) => m.groupId)} buIds={buIds} />
+      <UserForm me={me} action={updateUser} user={user} groupIds={memberships.map((m) => m.groupId)} buIds={buIds} managerIds={managers.map((m) => m.id)} />
     </>
   );
 }

@@ -53,7 +53,7 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
           </Link>
         ))}
       </div>
-      <TaskFilterBar me={me} f={searchParams} />
+      <TaskFilterBar me={me} f={searchParams} path="/tasks" />
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (
           <Empty>
@@ -67,7 +67,7 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
             <thead>
               <tr>
                 <th>Task</th>
-                <th>Client</th>
+                <th>Client / BU</th>
                 <th>Assigned to</th>
                 <th>Due</th>
                 <th>Priority</th>
@@ -96,6 +96,7 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
                     ) : (
                       "—"
                     )}
+                    <div className="text-xs text-slate-500">{r.businessUnit}</div>
                   </td>
                   <td className="min-w-[10rem] text-slate-600">
                     {r.assignees || "—"}

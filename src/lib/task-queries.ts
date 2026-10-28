@@ -2,11 +2,10 @@ import { and, asc, eq, exists, gte, ilike, inArray, isNotNull, lt, notInArray, o
 import { db, schema } from "@/db";
 import type { SessionUser } from "./auth";
 import { PRIORITIES, todayRiyadh } from "./meetings";
-import { userInMyBus } from "./access";
-import { OPEN_STATUSES, TASK_CATEGORIES, TASK_STATUSES, taskVisibleTo, type TaskStatus } from "./tasks";
+import { assignedToMyTeam, OPEN_STATUSES, TASK_CATEGORIES, TASK_STATUSES, taskVisibleTo, type TaskStatus } from "./tasks";
 
 export type TaskFilters = {
-  scope?: string; // "mine" (assigned to me, default) | "created" | "all"
+  scope?: string; // "mine" (assigned to me, default) | "created" | "team" (assigned to my reportees) | "all"
   bucket?: string; // today | week | overdue | upcoming | open (default) | completed | any
   status?: string;
   category?: string;
@@ -16,7 +15,7 @@ export type TaskFilters = {
   group?: string;
   priority?: string;
   q?: string;
-  bu?: string; // business unit: assigned to someone in it
+  bu?: string; // the task's business unit
 };
 
 const t = schema.tasks;
@@ -35,6 +34,7 @@ export function taskWhere(me: SessionUser, f: TaskFilters): SQL | undefined {
   const scope = f.scope ?? "mine";
   if (scope === "mine") w.push(assignedTo(me.id));
   if (scope === "created") w.push(eq(t.createdById, me.id));
+  if (scope === "team") w.push(assignedToMyTeam(me));
   const open = inArray(t.status, OPEN_STATUSES);
   const due = sql`${t.dueDate}::date`;
   switch (f.bucket ?? "open") {
@@ -73,15 +73,7 @@ export function taskWhere(me: SessionUser, f: TaskFilters): SQL | undefined {
           .where(and(eq(schema.taskGroups.taskId, t.id), eq(schema.taskGroups.groupId, Number(f.group)))),
       ),
     );
-  if (f.bu)
-    w.push(
-      exists(
-        db
-          .select({ one: sql`1` })
-          .from(schema.taskAssignees)
-          .where(and(eq(schema.taskAssignees.taskId, t.id), userInMyBus({ ...me, buIds: [Number(f.bu)] }, schema.taskAssignees.userId))),
-      ),
-    );
+  if (f.bu) w.push(eq(t.businessUnitId, Number(f.bu)));
   if (f.q) w.push(or(ilike(t.title, `%${f.q}%`), ilike(t.description, `%${f.q}%`), ilike(schema.clients.name, `%${f.q}%`)));
   const list = w.filter(Boolean) as SQL[];
   return list.length ? and(...list) : undefined;
@@ -106,6 +98,7 @@ export async function listTasks(me: SessionUser, f: TaskFilters, limit = 500) {
       fromBrief: sql<boolean>`${t.sourceBriefId} is not null`,
       createdById: t.createdById,
       parentId: t.parentTaskId,
+      businessUnit: sql<string>`(select b.name from business_units b where b.id = ${t.businessUnitId})`,
       parentTitle: sql<string | null>`(select p.title from tasks p where p.id = ${t.parentTaskId})`,
       assignees: sql<string>`(select string_agg(u.full_name, ', ' order by u.full_name) from task_assignees ta join users u on u.id = ta.user_id where ta.task_id = ${t.id})`.mapWith(String),
       assigneeIds: sql<number[]>`coalesce((select array_agg(ta.user_id order by u.full_name) from task_assignees ta join users u on u.id = ta.user_id where ta.task_id = ${t.id}), '{}')`,

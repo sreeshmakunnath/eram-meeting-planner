@@ -9,7 +9,7 @@ import { addComment, addSubtask, deleteTask, setTaskStatus, toggleSubtask, updat
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeUsers } from "@/lib/queries";
-import { canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
+import { canCommentOnTask, canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Task saved." },
@@ -30,6 +30,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
       assignees: { with: { user: { columns: { id: true, fullName: true } }, viaGroup: { columns: { name: true } } } },
       groups: { with: { group: { columns: { id: true, name: true } } } },
       parent: { columns: { id: true, title: true } },
+      businessUnit: { columns: { name: true } },
       subtasks: {
         orderBy: (s, { asc }) => [asc(s.createdAt), asc(s.id)],
         with: { assignees: { with: { user: { columns: { fullName: true } } } } },
@@ -41,6 +42,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
   if (!(await canViewTask(me, id))) redirect("/tasks");
   const editable = await canEditTask(me, task);
   const canWork = await canWorkOnTask(me, task);
+  const canComment = canWork || (await canCommentOnTask(me, task)); // managers of the people on it can comment
   const [subtasks, people] = await Promise.all([
     Promise.all(task.subtasks.map(async (s) => ({ ...s, canWork: await canWorkOnTask(me, s) }))),
     task.parentTaskId ? Promise.resolve([]) : activeUsers(),
@@ -197,7 +199,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
             ) : (
               <Empty>No comments yet.</Empty>
             )}
-            {canWork && (
+            {canComment && (
               <ActionForm action={addComment.bind(null, id)} className="border-t border-slate-100 p-4">
                 <textarea name="body" className="input mb-2" rows={2} placeholder="Write a comment. Type @username or @Firstname to notify someone." required />
                 <div className="flex justify-end">
@@ -239,6 +241,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
               ["Due", <span key="d" className={overdue ? "font-semibold text-red-600" : ""}>{fmtPlainDate(task.dueDate)}</span>],
               ["Start", fmtPlainDate(task.startDate)],
               ["Priority", PRIORITY_LABEL[task.priority]],
+              ["Business unit", task.businessUnit.name],
               [
                 "Client",
                 task.client ? (

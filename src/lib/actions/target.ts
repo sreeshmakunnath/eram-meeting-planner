@@ -7,6 +7,7 @@ import { audit } from "@/lib/audit";
 import { canManageClient } from "@/lib/access";
 import { requireSuperAdmin, requireUser } from "@/lib/auth";
 import { isSimilar } from "@/lib/similar";
+import { taskBuFor } from "@/lib/task-bu";
 import type { ActionState } from "@/components/action-form";
 import { FormError, int, str, toFormError } from "@/lib/form";
 import { CATEGORY_LABEL, logTaskActivity, notifyTaskAssigned, type TaskCategory, type TaskStatus } from "@/lib/tasks";
@@ -42,11 +43,12 @@ export async function createBdTasks(clientId: number, _: ActionState, fd: FormDa
       .from(schema.users)
       .where(and(inArray(schema.users.id, plan.map((p) => p.assigneeId)), eq(schema.users.status, "ACTIVE")));
     if (plan.some((p) => !people.some((u) => u.id === p.assigneeId))) throw new FormError("One of the people picked isn't an active user.");
+    const businessUnitId = await taskBuFor(db, { clientId, userId: me.id });
 
     for (const p of plan) {
       const [t] = await db
         .insert(schema.tasks)
-        .values({ title: p.title, category: p.cat, clientId, priority: "HIGH", dueDate: p.due, createdById: me.id })
+        .values({ title: p.title, category: p.cat, clientId, businessUnitId, priority: "HIGH", dueDate: p.due, createdById: me.id })
         .returning();
       await db.insert(schema.taskAssignees).values({ taskId: t.id, userId: p.assigneeId });
       await logTaskActivity(t.id, me.id, "CREATED", { from: "Target Schedule" });
@@ -161,7 +163,17 @@ export async function importTargetSchedule(_: TargetImportResult | undefined, fd
       } else {
         const [t] = await db
           .insert(schema.tasks)
-          .values({ title: `${CATEGORY_LABEL[p.cat]} – ${client.name}`, category: p.cat, clientId: client.id, priority: "HIGH", dueDate: p.due, status: p.status, description, createdById: admin.id })
+          .values({
+            title: `${CATEGORY_LABEL[p.cat]} – ${client.name}`,
+            category: p.cat,
+            clientId: client.id,
+            businessUnitId: await taskBuFor(db, { clientId: client.id, userId: admin.id }),
+            priority: "HIGH",
+            dueDate: p.due,
+            status: p.status,
+            description,
+            createdById: admin.id,
+          })
           .returning();
         taskId = t.id;
         await logTaskActivity(taskId, admin.id, "CREATED", { from: `Target Schedule import (${file.name})` });

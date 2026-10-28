@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { Badge, Empty, labelize, PageHeader } from "@/components/ui";
 import { updateBdStage } from "@/lib/actions/clients";
+import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { scopeToBu } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
@@ -48,27 +49,35 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
       />
       <div className="mb-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">{FLAG_ORDER.map(tile)}</div>
 
-      <form className="card mb-4 flex flex-wrap gap-3 p-3">
-        {searchParams.flag && <input type="hidden" name="flag" value={searchParams.flag} />}
-        <input name="q" defaultValue={searchParams.q} placeholder="Search client" className="input max-w-xs" />
-        <select name="stage" defaultValue={searchParams.stage ?? ""} className="input max-w-[12rem]">
-          <option value="">Any BD stage</option>
-          {BD_STAGES.map((s) => (
-            <option key={s} value={s}>
-              {BD_STAGE_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        <select name="owner" defaultValue={searchParams.owner ?? ""} className="input max-w-[14rem]">
-          <option value="">Any account owner</option>
-          {owners.map(([id, name]) => (
-            <option key={id} value={id}>
-              {name}
-            </option>
-          ))}
-        </select>
-        <button className="btn-secondary">Filter</button>
-      </form>
+<FilterBar
+        keep={{ flag: searchParams.flag, bu: searchParams.bu }}
+        clearHref={`/reports/client-status${searchParams.bu ? `?bu=${searchParams.bu}` : ""}`}
+        active={countActive(searchParams, ["q", "stage", "owner"])}
+      >
+        <FilterField label="Search" size="lg">
+          <input name="q" defaultValue={searchParams.q} placeholder="Client name" className="input" />
+        </FilterField>
+        <FilterField label="BD stage">
+          <select name="stage" defaultValue={searchParams.stage ?? ""} className="input">
+            <option value="">Any</option>
+            {BD_STAGES.map((s) => (
+              <option key={s} value={s}>
+                {BD_STAGE_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Account owner">
+          <select name="owner" defaultValue={searchParams.owner ?? ""} className="input">
+            <option value="">Anyone</option>
+            {owners.map(([id, name]) => (
+              <option key={id} value={id}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+      </FilterBar>
 
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (

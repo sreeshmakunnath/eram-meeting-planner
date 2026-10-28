@@ -2,6 +2,7 @@ import { and, eq, exists, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
+import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { requireUser } from "@/lib/auth";
 import { meetingsBetween, toBeScheduled } from "@/lib/meeting-queries";
 import { tasksDueBetween } from "@/lib/task-queries";
@@ -119,38 +120,41 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           </Link>
         </div>
       </div>
-      <form className="card mb-4 flex flex-wrap gap-3 p-3">
-        <input type="hidden" name="month" value={ym} />
-        <input type="hidden" name="view" value={view} />
-        <select name="user" defaultValue={searchParams.user ?? ""} className="input max-w-[14rem]">
-          <option value="">{me.role === "SUPER_ADMIN" ? "Everyone" : "All I can see"}</option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.id === me.id ? `Me (${u.fullName})` : u.fullName}
-            </option>
-          ))}
-        </select>
-        <select name="group" defaultValue={searchParams.group ?? ""} className="input max-w-[14rem]">
-          <option value="">Any group</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </select>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+<FilterBar keep={{ month: ym, view }} clearHref={`/meetings/calendar?month=${ym}&view=${view}`} active={countActive(searchParams, ["user", "group", "client", "tasks"])}>
+        <FilterField label="Person">
+          <select name="user" defaultValue={searchParams.user ?? ""} className="input">
+            <option value="">{me.role === "SUPER_ADMIN" ? "Everyone" : "All I can see"}</option>
+            {users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.id === me.id ? `Me (${u.fullName})` : u.fullName}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Group">
+          <select name="group" defaultValue={searchParams.group ?? ""} className="input">
+            <option value="">Any</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Client">
+          <select name="client" defaultValue={searchParams.client ?? ""} className="input">
+            <option value="">All</option>
+            {clients.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <label className="flex items-center gap-2 pb-2 text-sm text-slate-600">
           <input type="checkbox" name="tasks" value="0" defaultChecked={!showTasks} className="accent-brand" /> Hide task due dates
         </label>
-        <select name="client" defaultValue={searchParams.client ?? ""} className="input max-w-[14rem]">
-          <option value="">Any client</option>
-          {clients.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <button className="btn-secondary">Apply</button>
-      </form>
+      </FilterBar>
 
       <div className="grid gap-6 xl:grid-cols-4">
         <div className="xl:col-span-3">

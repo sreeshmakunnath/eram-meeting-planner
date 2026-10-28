@@ -15,7 +15,7 @@ export default async function BoardPage({ searchParams }: { searchParams: TaskFi
     <>
       <PageHeader title="Task board" subtitle="Drag a card to change its status. Completed shows the last 14 days." actions={<NewTaskButton />} />
       <TaskTabs active="board" qs={qs} />
-      <TaskFilterBar me={me} f={searchParams} showBucket={false} />
+      <TaskFilterBar me={me} f={searchParams} path="/tasks/board" showBucket={false} />
       <Board
         cards={rows.map((r) => ({
           id: r.id,

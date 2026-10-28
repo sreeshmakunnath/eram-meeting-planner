@@ -1,77 +1,96 @@
-import { selectableBus } from "@/lib/access";
+import { countActive, FilterBar, FilterField } from "@/components/filters";
+import { selectableBus, teamIds } from "@/lib/access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "@/lib/auth";
 import type { TaskFilters } from "@/lib/task-queries";
 import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
 import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
-/** Shared filter bar for list / board / timeline. */
-export async function TaskFilterBar({ me, f, showBucket = true }: { me: SessionUser; f: TaskFilters; showBucket?: boolean }) {
-  const [users, groups, clients, units] = await Promise.all([activeUsers(), activeGroups(), clientOptions(me), selectableBus(me)]);
-  const showBu = units.length > 1;
+/** Shared filter bar for list / board / timeline. `path` is the page, for the Clear link. */
+export async function TaskFilterBar({ me, f, path, showBucket = true }: { me: SessionUser; f: TaskFilters; path: string; showBucket?: boolean }) {
+  const [users, groups, clients, units, team] = await Promise.all([activeUsers(), activeGroups(), clientOptions(me), selectableBus(me), teamIds(me.id)]);
+  const keys = ["scope", "q", "bu", "client", "user", "group", "category", ...(showBucket ? ["status"] : [])];
+  const bucket = showBucket ? f.bucket : undefined;
   return (
-    <form className={`card mb-4 grid gap-3 p-3 sm:grid-cols-3 ${showBu ? "lg:grid-cols-9" : "lg:grid-cols-8"}`}>
-      {showBucket && f.bucket && <input type="hidden" name="bucket" value={f.bucket} />}
-      <select name="scope" defaultValue={f.scope ?? "mine"} className="input">
-        <option value="mine">Assigned to me</option>
-        <option value="created">Created by me</option>
-        <option value="all">{me.role === "SUPER_ADMIN" ? "Everyone" : isAdmin(me) ? "Everyone in my business units" : "All I can see"}</option>
-      </select>
-      <input name="q" defaultValue={f.q} placeholder="Search tasks" className="input lg:col-span-2" />
-      <select name="category" defaultValue={f.category ?? ""} className="input">
-        <option value="">Any category</option>
-        {Object.entries(CATEGORY_LABEL).map(([v, l]) => (
-          <option key={v} value={v}>
-            {l}
-          </option>
-        ))}
-      </select>
-      {showBu && (
-        <select name="bu" defaultValue={f.bu ?? ""} className="input" title="Tasks assigned to people in this business unit">
-          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
-          {units.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.name}
+    <FilterBar
+      keep={{ bucket }}
+      clearHref={bucket ? `${path}?bucket=${bucket}` : path}
+      active={countActive(f as Record<string, string | undefined>, keys, { scope: "mine" })}
+    >
+      <FilterField label="Search" size="lg">
+        <input name="q" defaultValue={f.q} placeholder="Title, description or client" className="input" />
+      </FilterField>
+      <FilterField label="Show">
+        <select name="scope" defaultValue={f.scope ?? "mine"} className="input">
+          <option value="mine">Assigned to me</option>
+          <option value="created">Created by me</option>
+          {(team.length > 0 || f.scope === "team") && <option value="team">My team&apos;s</option>}
+          <option value="all">{isSuperAdmin(me) ? "Everyone's" : isAdmin(me) ? "All in my business units" : "All I can see"}</option>
+        </select>
+      </FilterField>
+      {units.length > 1 && (
+        <FilterField label="Business unit">
+          <select name="bu" defaultValue={f.bu ?? ""} className="input">
+            <option value="">All</option>
+            {units.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+      )}
+      <FilterField label="Client">
+        <select name="client" defaultValue={f.client ?? ""} className="input">
+          <option value="">All</option>
+          {clients.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
             </option>
           ))}
         </select>
-      )}
-      <select name="client" defaultValue={f.client ?? ""} className="input">
-        <option value="">Any client</option>
-        {clients.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-      <select name="user" defaultValue={f.user ?? ""} className="input">
-        <option value="">Any assignee</option>
-        {users.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.fullName}
-          </option>
-        ))}
-      </select>
-      <select name="group" defaultValue={f.group ?? ""} className="input">
-        <option value="">Any group</option>
-        {groups.map((g) => (
-          <option key={g.id} value={g.id}>
-            {g.name}
-          </option>
-        ))}
-      </select>
-      <div className="flex gap-2">
-        {showBucket && (
+      </FilterField>
+      <FilterField label="Assignee">
+        <select name="user" defaultValue={f.user ?? ""} className="input">
+          <option value="">Anyone</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.fullName}
+            </option>
+          ))}
+        </select>
+      </FilterField>
+      <FilterField label="Group" size="sm">
+        <select name="group" defaultValue={f.group ?? ""} className="input">
+          <option value="">Any</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </FilterField>
+      <FilterField label="Category" size="sm">
+        <select name="category" defaultValue={f.category ?? ""} className="input">
+          <option value="">Any</option>
+          {Object.entries(CATEGORY_LABEL).map(([v, l]) => (
+            <option key={v} value={v}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </FilterField>
+      {showBucket && (
+        <FilterField label="Status" size="sm">
           <select name="status" defaultValue={f.status ?? ""} className="input">
-            <option value="">Any status</option>
+            <option value="">Any</option>
             {Object.entries(TASK_STATUS_LABEL).map(([v, l]) => (
               <option key={v} value={v}>
                 {l}
               </option>
             ))}
           </select>
-        )}
-        <button className="btn-secondary">Filter</button>
-      </div>
-    </form>
+        </FilterField>
+      )}
+    </FilterBar>
   );
 }

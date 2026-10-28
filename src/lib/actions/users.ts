@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { canManageUser, mergeBuIds, userBuIds } from "@/lib/access";
+import { canManageUser, mergeBuIds, teamIds, userBuIds } from "@/lib/access";
 import { isSuperAdmin, requireAdmin, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
@@ -38,7 +38,6 @@ function readUser(fd: FormData, actor: SessionUser) {
     businessUnitId,
     designation: str(fd, "designation"),
     mobile,
-    managerId: int(fd, "managerId"),
   };
 }
 
@@ -58,6 +57,22 @@ async function readBusinessUnits(fd: FormData, actor: SessionUser, primary: numb
 async function setBusinessUnits(userId: number, ids: number[]) {
   await db.delete(schema.userBusinessUnits).where(eq(schema.userBusinessUnits.userId, userId));
   await db.insert(schema.userBusinessUnits).values(ids.map((businessUnitId) => ({ userId, businessUnitId })));
+}
+
+/** Replaces the user's reporting managers. Nobody can manage themselves or someone above them (no loops). */
+async function setManagers(userId: number | null, managerIds: number[]) {
+  const ids = [...new Set(managerIds)];
+  if (userId) {
+    if (ids.includes(userId)) throw new FormError("A user can't be their own reporting manager.");
+    const below = await teamIds(userId);
+    if (ids.some((m) => below.includes(m))) throw new FormError("A manager can't be someone who reports to this user.");
+  }
+  return async (id: number) => {
+    const before = (await db.select().from(schema.userManagers).where(eq(schema.userManagers.userId, id))).map((r) => r.managerId);
+    await db.delete(schema.userManagers).where(eq(schema.userManagers.userId, id));
+    if (ids.length) await db.insert(schema.userManagers).values(ids.map((managerId) => ({ userId: id, managerId })));
+    return [...before].sort().join() !== [...ids].sort().join();
+  };
 }
 
 /** Optional password typed by the Admin. Returns null when left blank. */
@@ -111,6 +126,7 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
     const admin = await requireAdmin();
     const data = readUser(fd, admin);
     const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, null);
+    const saveManagers = await setManagers(null, ints(fd, "managerIds"));
     const password = readPassword(fd);
     passwordSet = !!password;
     const [user] = await db
@@ -119,6 +135,7 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
       .returning();
     id = user.id;
     await setBusinessUnits(user.id, buIds);
+    await saveManagers(user.id);
     await syncMemberships(user.id, user.email, user.fullName, ints(fd, "groupIds"), admin.id);
     if (password) await sendAccountReadyEmail(user);
     else await sendWelcomeEmail(user);
@@ -143,9 +160,10 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     if (id === admin.id && data.role !== admin.role) throw new FormError("You can't change your own role.");
     const buBefore = await userBuIds(id);
     const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, id);
-    if (data.managerId === id) throw new FormError("A user can't be their own reporting manager.");
+    const saveManagers = await setManagers(id, ints(fd, "managerIds"));
     await db.update(schema.users).set({ ...data, updatedById: admin.id }).where(eq(schema.users.id, id));
     await setBusinessUnits(id, buIds);
+    const managersChanged = await saveManagers(id);
     if (password) {
       // A new password also clears any lockout so the user can sign in with it right away.
       await db.update(schema.users).set({ passwordHash: await hashPassword(password), failedLogins: 0, lockedUntil: null }).where(eq(schema.users.id, id));
@@ -154,6 +172,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     const groups = await syncMemberships(id, data.email, data.fullName, ints(fd, "groupIds"), admin.id);
     const changed = Object.keys(data).filter((k) => String(before[k as keyof typeof before] ?? "") !== String(data[k as keyof typeof data] ?? ""));
     if ([...buBefore].sort().join() !== [...buIds].sort().join()) changed.push("businessUnits");
+    if (managersChanged) changed.push("managers");
     await audit(admin.id, "USER_UPDATED", "user", id, { changed, groupsAdded: groups.added, groupsRemoved: groups.removed });
     revalidatePath("/admin/users");
     return { ok: password ? "User saved and password changed." : "User saved." };

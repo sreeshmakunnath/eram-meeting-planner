@@ -38,7 +38,7 @@ export default async function TimelinePage({ searchParams }: { searchParams: Tas
     <>
       <PageHeader title="Task timeline" subtitle="Each bar runs from the task's start date (or due date) to its due date." actions={<NewTaskButton />} />
       <TaskTabs active="timeline" qs={new URLSearchParams(keep).toString()} />
-      <TaskFilterBar me={me} f={searchParams} showBucket={false} />
+      <TaskFilterBar me={me} f={searchParams} path="/tasks/timeline" showBucket={false} />
       <div className="mb-3 flex items-center gap-2">
         <Link href={nav(addDays(start, -14))} className="btn-secondary px-3" aria-label="Earlier">
           ←

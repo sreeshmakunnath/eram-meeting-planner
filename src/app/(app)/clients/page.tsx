@@ -2,6 +2,7 @@ import { and, asc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import Link from "next/link";
 import { Badge, Empty, labelize, PageHeader, statusTone } from "@/components/ui";
 import { db, schema } from "@/db";
+import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { clientVisibleTo, contactVisibleTo } from "@/lib/access";
 import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
 import { activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES } from "@/lib/queries";
@@ -83,50 +84,65 @@ export default async function ClientsPage({ searchParams }: { searchParams: Sear
           {pending} client{pending === 1 ? "" : "s"} waiting for review →
         </Link>
       )}
-      <form className="card mb-4 grid gap-3 p-4 md:grid-cols-7">
-        <input name="q" defaultValue={searchParams.q} placeholder="Search name, code, city" className="input md:col-span-2" />
-        <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
-          <option value="">{isSuperAdmin(me) ? "All business units" : "All my business units"}</option>
-          {bus.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
-        <select name="type" defaultValue={searchParams.type ?? ""} className="input">
-          <option value="">All types</option>
-          {CLIENT_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {labelize(t)}
-            </option>
-          ))}
-        </select>
-        <select name="stage" defaultValue={searchParams.stage ?? ""} className="input">
-          <option value="">Any BD stage</option>
-          {BD_STAGES.map((s) => (
-            <option key={s} value={s}>
-              {BD_STAGE_LABELS[s]}
-            </option>
-          ))}
-        </select>
-        <select name="owner" defaultValue={searchParams.owner ?? ""} className="input">
-          <option value="">Any owner</option>
-          {owners.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.fullName}
-            </option>
-          ))}
-        </select>
-        <div className="flex gap-2">
+<FilterBar
+        keep={{ country: searchParams.country }}
+        clearHref="/clients"
+        active={countActive(searchParams, ["q", "bu", "type", "stage", "owner", "status"], { status: "ACTIVE" })}
+      >
+        <FilterField label="Search" size="lg">
+          <input name="q" defaultValue={searchParams.q} placeholder="Name, short code or city" className="input" />
+        </FilterField>
+        {bus.length > 1 && (
+          <FilterField label="Business unit">
+            <select name="bu" defaultValue={searchParams.bu ?? ""} className="input">
+              <option value="">All</option>
+              {bus.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </FilterField>
+        )}
+        <FilterField label="Type" size="sm">
+          <select name="type" defaultValue={searchParams.type ?? ""} className="input">
+            <option value="">All</option>
+            {CLIENT_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {labelize(t)}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="BD stage" size="sm">
+          <select name="stage" defaultValue={searchParams.stage ?? ""} className="input">
+            <option value="">Any</option>
+            {BD_STAGES.map((s) => (
+              <option key={s} value={s}>
+                {BD_STAGE_LABELS[s]}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Account owner">
+          <select name="owner" defaultValue={searchParams.owner ?? ""} className="input">
+            <option value="">Anyone</option>
+            {owners.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.fullName}
+              </option>
+            ))}
+          </select>
+        </FilterField>
+        <FilterField label="Status" size="sm">
           <select name="status" defaultValue={status} className="input">
             <option value="ACTIVE">Active</option>
             <option value="PENDING_REVIEW">Pending</option>
             <option value="INACTIVE">Inactive</option>
             <option value="ALL">All</option>
           </select>
-          <button className="btn-secondary">Filter</button>
-        </div>
-      </form>
+        </FilterField>
+      </FilterBar>
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (
           <Empty>No clients match these filters.</Empty>
