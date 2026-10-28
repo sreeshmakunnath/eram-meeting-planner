@@ -64,14 +64,16 @@ export async function canSeeClient(me: SessionUser, clientId: number) {
   return !!row;
 }
 
-/** Edit a client: Super Admin, the account owner, or an Admin of one of the client's business units. */
+/**
+ * Full control of a client (account owner, business units, BD tasks): Super Admin, the account owner, an Admin of
+ * one of the client's business units, or a manager (any level) of whoever added or owns it.
+ */
 export async function canManageClient(me: SessionUser, client: { id: number; accountOwnerId: number | null }) {
   if (isSuperAdmin(me) || client.accountOwnerId === me.id) return true;
-  if (!isAdmin(me)) return false;
   const [row] = await db
     .select({ id: schema.clients.id })
     .from(schema.clients)
-    .where(and(eq(schema.clients.id, client.id), clientInMyBus(me, schema.clients.id)));
+    .where(and(eq(schema.clients.id, client.id), or(isAdmin(me) ? clientInMyBus(me, schema.clients.id) : undefined, clientOfMyTeam(me))));
   return !!row;
 }
 

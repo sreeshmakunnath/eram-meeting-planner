@@ -62,7 +62,8 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       if (!full && !(await canSeeClient(me, id))) throw new FormError("You don't have access to this client.");
       if (!full) data.accountOwnerId = before.accountOwnerId;
       const bus = full ? mergeBuIds(me, ints(fd, "businessUnitIds"), await clientBuIds(id), "client") : { error: null, ids: await clientBuIds(id) };
-      if (bus.error) throw new FormError(bus.error);
+      // A manager may share none of the client's units; the units already on it are then kept
+      if (bus.error && !(bus.ids.length && !isAdmin(me))) throw new FormError(bus.error);
       const status = isAdmin(me) && requested && CLIENT_STATUSES.includes(requested) ? requested : before.status;
       const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
       await db.update(schema.clients).set({ ...data, status }).where(eq(schema.clients.id, id));

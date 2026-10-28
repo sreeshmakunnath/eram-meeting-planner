@@ -75,7 +75,7 @@ export async function ClientForm({ me, client, buIds = [], limited = false }: { 
             <option value="Batch 3" />
           </datalist>
         </Field>
-        <Field label="Account owner" hint={limited ? "Only an Admin or the account owner can change this." : "Main ERAM contact for this client."}>
+        <Field label="Account owner" hint={limited ? "Only an Admin, the account owner or their manager can change this." : "Main ERAM contact for this client."}>
           <select name="accountOwnerId" className="input" defaultValue={client?.accountOwnerId ?? ""} disabled={limited}>
             <option value="">—</option>
             {users.map((u) => (
@@ -112,7 +112,7 @@ export async function ClientForm({ me, client, buIds = [], limited = false }: { 
                 .filter((b) => buIds.includes(b.id))
                 .map((b) => b.name)
                 .join(", ") || "—"}
-              <span className="block text-xs text-slate-500">Only an Admin or the account owner can change these.</span>
+              <span className="block text-xs text-slate-500">Only an Admin, the account owner or their manager can change these.</span>
             </p>
           ) : (
             <>

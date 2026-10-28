@@ -22,7 +22,7 @@ export async function createBdTasks(clientId: number, _: ActionState, fd: FormDa
   try {
     const me = await requireUser();
     const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
-    if (!client || !(await canManageClient(me, client))) throw new FormError("Only an Admin of this client's business units or the account owner can create its BD tasks.");
+    if (!client || !(await canManageClient(me, client))) throw new FormError("Only the account owner, their managers or an Admin of this client's business units can create its BD tasks.");
     const existing = await db
       .select({ category: schema.tasks.category })
       .from(schema.tasks)
