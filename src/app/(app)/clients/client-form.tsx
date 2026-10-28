@@ -9,7 +9,8 @@ import { allowedBuIds } from "@/lib/access";
 import { isAdmin, type SessionUser } from "@/lib/auth";
 import { activeBusinessUnits, activeGroups, activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES, INDUSTRIES } from "@/lib/queries";
 
-export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; client?: Client; buIds?: number[] }) {
+/** `limited`: the editor can fill in details but not change the account owner or business units. */
+export async function ClientForm({ me, client, buIds = [], limited = false }: { me: SessionUser; client?: Client; buIds?: number[]; limited?: boolean }) {
   const [users, groups, allBus] = await Promise.all([activeUsers(), activeGroups(), activeBusinessUnits()]);
   // Only the person's own business units can be ticked; other units already on the client are kept on save.
   const allowed = allowedBuIds(me, allBus.map((b) => b.id));
@@ -74,8 +75,8 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
             <option value="Batch 3" />
           </datalist>
         </Field>
-        <Field label="Account owner" hint="Main ERAM contact for this client.">
-          <select name="accountOwnerId" className="input" defaultValue={client?.accountOwnerId ?? ""}>
+        <Field label="Account owner" hint={limited ? "Only an Admin or the account owner can change this." : "Main ERAM contact for this client."}>
+          <select name="accountOwnerId" className="input" defaultValue={client?.accountOwnerId ?? ""} disabled={limited}>
             <option value="">—</option>
             {users.map((u) => (
               <option key={u.id} value={u.id}>
@@ -105,11 +106,23 @@ export async function ClientForm({ me, client, buIds = [] }: { me: SessionUser; 
         )}
         <div className="md:col-span-2">
           <span className="label">Relevant business units *</span>
-          <CheckboxList name="businessUnitIds" options={bus.map((b) => ({ id: b.id, label: b.name }))} selected={!client && bus.length === 1 ? [bus[0].id] : buIds} />
-          <p className="mt-1 text-xs text-slate-500">
-            Only people in these business units can see this client.
-            {otherBus.length > 0 && <> Also shared with {otherBus.map((b) => b.name).join(", ")} (kept as is).</>}
-          </p>
+          {limited ? (
+            <p className="text-sm text-slate-700">
+              {allBus
+                .filter((b) => buIds.includes(b.id))
+                .map((b) => b.name)
+                .join(", ") || "—"}
+              <span className="block text-xs text-slate-500">Only an Admin or the account owner can change these.</span>
+            </p>
+          ) : (
+            <>
+              <CheckboxList name="businessUnitIds" options={bus.map((b) => ({ id: b.id, label: b.name }))} selected={!client && bus.length === 1 ? [bus[0].id] : buIds} />
+              <p className="mt-1 text-xs text-slate-500">
+                Only people in these business units can see this client.
+                {otherBus.length > 0 && <> Also shared with {otherBus.map((b) => b.name).join(", ")} (kept as is).</>}
+              </p>
+            </>
+          )}
         </div>
         <div className="md:col-span-2">
           <Field label="Notes">

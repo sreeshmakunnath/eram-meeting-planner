@@ -104,11 +104,9 @@ export default async function ClientPage({ params, searchParams }: { params: { i
             <Link href={`/meetings/new?client=${id}`} className="btn-secondary">
               New meeting
             </Link>
-            {editable && (
-              <Link href={`${base}/edit`} className="btn-primary">
-                Edit client
-              </Link>
-            )}
+            <Link href={`${base}/edit`} className="btn-primary">
+              Edit client
+            </Link>
           </>
         }
       />

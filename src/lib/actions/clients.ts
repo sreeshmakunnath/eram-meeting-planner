@@ -53,23 +53,31 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
     data.name = await assertClientName(data.name, { excludeId: id, confirmed: fd.get("confirmDifferent") === "on", previousName: previous?.name });
 
     const requested = str(fd, "status") as (typeof CLIENT_STATUSES)[number] | null;
-    const bus = mergeBuIds(me, ints(fd, "businessUnitIds"), id ? await clientBuIds(id) : [], "client");
-    if (bus.error) throw new FormError(bus.error);
     if (id) {
       const [before] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
       if (!before) throw new FormError("Client not found.");
-      if (!(await canManageClient(me, before))) throw new FormError("Only an Admin of this client's business units or the account owner can edit this client.");
+      // Anyone who can see the client fills in its details; the account owner (who sees private contacts) and
+      // the business units (who sees the client) stay with Admins and the owner.
+      const full = await canManageClient(me, before);
+      if (!full && !(await canSeeClient(me, id))) throw new FormError("You don't have access to this client.");
+      if (!full) data.accountOwnerId = before.accountOwnerId;
+      const bus = full ? mergeBuIds(me, ints(fd, "businessUnitIds"), await clientBuIds(id), "client") : { error: null, ids: await clientBuIds(id) };
+      if (bus.error) throw new FormError(bus.error);
       const status = isAdmin(me) && requested && CLIENT_STATUSES.includes(requested) ? requested : before.status;
+      const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
       await db.update(schema.clients).set({ ...data, status }).where(eq(schema.clients.id, id));
-      await audit(me.id, "CLIENT_UPDATED", "client", id, { name: data.name, status });
+      await setBusinessUnits(id, bus.ids);
+      await audit(me.id, "CLIENT_UPDATED", "client", id, { name: data.name, status, changed });
     } else {
+      const bus = mergeBuIds(me, ints(fd, "businessUnitIds"), [], "client");
+      if (bus.error) throw new FormError(bus.error);
       // Users' new clients wait for Admin review so duplicates don't build up.
       const status = isAdmin(me) ? (requested && CLIENT_STATUSES.includes(requested) ? requested : "ACTIVE") : "PENDING_REVIEW";
       const [c] = await db.insert(schema.clients).values({ ...data, status, createdById: me.id }).returning();
       id = c.id;
+      await setBusinessUnits(id, bus.ids);
       await audit(me.id, "CLIENT_CREATED", "client", id, { name: data.name, status });
     }
-    await setBusinessUnits(id, bus.ids);
   } catch (e) {
     return toFormError(e);
   }
@@ -164,11 +172,11 @@ export async function deleteContact(clientId: number, contactId: number) {
   revalidatePath(`/clients/${clientId}`);
 }
 
-/** Inline BD stage change from the client status board (Admin or account owner). */
+/** Inline BD stage change from the client status board (anyone who can see the client, like the edit form). */
 export async function updateBdStage(clientId: number, fd: FormData) {
   const me = await requireUser();
   const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, clientId));
-  if (!client || !(await canManageClient(me, client))) return;
+  if (!client || !(await canSeeClient(me, clientId))) return;
   const v = str(fd, "bdStage") as (typeof BD_STAGES)[number] | null;
   const bdStage = v && BD_STAGES.includes(v) ? v : null;
   await db.update(schema.clients).set({ bdStage }).where(eq(schema.clients.id, clientId));

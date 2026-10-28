@@ -98,7 +98,6 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
             </thead>
             <tbody className="divide-y divide-slate-100">
               {rows.map((r) => {
-                const canStage = me.role !== "USER" || r.ownerId === me.id; // checked again on save
                 return (
                   <tr key={r.id} className="hover:bg-slate-50">
                     <td className="min-w-[11rem]">
@@ -116,22 +115,16 @@ export default async function ClientStatusPage({ searchParams }: { searchParams:
                       {r.priority === "HIGH" && <div className="mt-1 text-xs font-medium text-red-600">High priority</div>}
                     </td>
                     <td>
-                      {canStage ? (
-                        <form action={updateBdStage.bind(null, r.id)}>
-                          <AutoSubmitSelect name="bdStage" defaultValue={r.bdStage ?? ""} className="input min-w-[8.5rem] py-1 text-xs" aria-label={`BD stage for ${r.name}`}>
-                            <option value="">—</option>
-                            {BD_STAGES.map((s) => (
-                              <option key={s} value={s}>
-                                {BD_STAGE_LABELS[s]}
-                              </option>
-                            ))}
-                          </AutoSubmitSelect>
-                        </form>
-                      ) : r.bdStage ? (
-                        BD_STAGE_LABELS[r.bdStage]
-                      ) : (
-                        "—"
-                      )}
+                      <form action={updateBdStage.bind(null, r.id)}>
+                        <AutoSubmitSelect name="bdStage" defaultValue={r.bdStage ?? ""} className="input min-w-[8.5rem] py-1 text-xs" aria-label={`BD stage for ${r.name}`}>
+                          <option value="">—</option>
+                          {BD_STAGES.map((s) => (
+                            <option key={s} value={s}>
+                              {BD_STAGE_LABELS[s]}
+                            </option>
+                          ))}
+                        </AutoSubmitSelect>
+                      </form>
                     </td>
                     <td className="whitespace-nowrap">
                       {r.last ? (
