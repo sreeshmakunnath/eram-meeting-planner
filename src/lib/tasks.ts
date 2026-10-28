@@ -3,8 +3,14 @@ import { db, schema } from "@/db";
 import { teamOf } from "./access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 import { appUrl, button, esc, sendMail } from "./mail";
-import { fmtPlainDate } from "./meetings";
+import { fmtPlainDate, riyadhParts } from "./meetings";
 import { notify } from "./notifications";
+
+/** Days between the due date and completion (Saudi dates): negative = early, 0 = on the day, positive = late. */
+export function completionDelta(dueDate: string | null, completedAt: Date | null) {
+  if (!dueDate || !completedAt) return null;
+  return Math.round((Date.parse(riyadhParts(completedAt).date) - Date.parse(dueDate.slice(0, 10))) / 86400_000);
+}
 
 export const TASK_STATUSES = ["NOT_STARTED", "STARTED", "IN_PROGRESS", "ON_HOLD", "COMPLETED", "CANCELLED"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];

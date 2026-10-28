@@ -3,7 +3,8 @@ import { Badge, Empty, Notice, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { fmtPlainDate, PRIORITY_LABEL } from "@/lib/meetings";
 import { listTasks, type TaskFilters } from "@/lib/task-queries";
-import { CATEGORY_LABEL, TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
+import { DueDelta } from "@/components/due-delta";
+import { CATEGORY_LABEL, completionDelta, TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
 import { TaskFilterBar } from "./task-filters";
 import { NewTaskButton, TaskTabs } from "./task-nav";
 
@@ -105,6 +106,11 @@ export default async function TasksPage({ searchParams }: { searchParams: TaskFi
                   <td className={`whitespace-nowrap ${r.overdue ? "font-semibold text-red-600" : ""}`}>
                     {fmtPlainDate(r.dueDate)}
                     {r.overdue && <div className="text-xs font-normal">Overdue</div>}
+                    {r.status === "COMPLETED" && (
+                      <div className="text-xs">
+                        <DueDelta days={completionDelta(r.dueDate, r.completedAt)} />
+                      </div>
+                    )}
                   </td>
                   <td>{PRIORITY_LABEL[r.priority]}</td>
                   <td>

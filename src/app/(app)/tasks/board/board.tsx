@@ -2,9 +2,10 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { DueDelta } from "@/components/due-delta";
 import { setTaskStatus } from "@/lib/actions/tasks";
 
-type Card = { id: number; title: string; status: string; client: string | null; assignees: string; dueDate: string | null; overdue: boolean; priority: string; canMove: boolean };
+type Card = { id: number; title: string; status: string; client: string | null; assignees: string; dueDate: string | null; overdue: boolean; doneDelta: number | null; priority: string; canMove: boolean };
 const COLUMNS: [string, string][] = [
   ["NOT_STARTED", "Not started"],
   ["STARTED", "Started"],
@@ -84,7 +85,11 @@ export function Board({ cards: initial }: { cards: Card[] }) {
                     {c.client && <div className="text-xs text-slate-500">{c.client}</div>}
                     <div className="mt-1.5 flex items-center justify-between text-xs">
                       <span className="truncate text-slate-500">{c.assignees}</span>
-                      {c.dueDate && <span className={c.overdue ? "font-semibold text-red-600" : "text-slate-500"}>{fmt(c.dueDate)}</span>}
+                      {c.dueDate && (
+                        <span className={c.overdue ? "font-semibold text-red-600" : "text-slate-500"}>
+                          {fmt(c.dueDate)} <DueDelta days={c.doneDelta} />
+                        </span>
+                      )}
                     </div>
                     {c.canMove && (
                       <select

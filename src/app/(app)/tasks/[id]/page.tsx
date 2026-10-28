@@ -3,13 +3,14 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoSubmitCheckbox } from "@/components/auto-submit-checkbox";
+import { DueDelta } from "@/components/due-delta";
 import { Badge, Empty, fmtDateTime, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { addComment, addSubtask, deleteTask, setTaskStatus, toggleSubtask, updateProgress } from "@/lib/actions/tasks";
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeUsers } from "@/lib/queries";
-import { canCommentOnTask, canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
+import { canCommentOnTask, canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, completionDelta, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Task saved." },
@@ -152,6 +153,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
                         <span className="flex items-center gap-3 text-xs text-slate-500">
                           <span>{s.assignees.map((a) => a.user.fullName).join(", ") || "—"}</span>
                           <span className={late ? "font-semibold text-red-600" : ""}>{s.dueDate ? fmtPlainDate(s.dueDate) : "no due date"}</span>
+                          {done && <DueDelta days={completionDelta(s.dueDate, s.completedAt)} />}
                           {!done && <Badge tone={TASK_STATUS_TONE[s.status]}>{TASK_STATUS_LABEL[s.status]}</Badge>}
                         </span>
                       </li>
@@ -263,7 +265,21 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
                   "—"
                 ),
               ],
-              ["Completed", task.completedAt ? fmtDateTime(task.completedAt) : "—"],
+              [
+                "Completed",
+                task.completedAt ? (
+                  <span key="c">
+                    {fmtDateTime(task.completedAt)}
+                    {task.status === "COMPLETED" && (
+                      <span className="block text-xs">
+                        <DueDelta days={completionDelta(task.dueDate, task.completedAt)} />
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  "—"
+                ),
+              ],
             ].map(([k, v]) => (
               <div key={k as string} className="flex justify-between gap-3 py-2.5">
                 <span className="text-slate-500">{k}</span>

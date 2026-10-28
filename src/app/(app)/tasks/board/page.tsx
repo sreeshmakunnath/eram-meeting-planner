@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { listTasks, type TaskFilters } from "@/lib/task-queries";
+import { completionDelta } from "@/lib/tasks";
 import { TaskFilterBar } from "../task-filters";
 import { NewTaskButton, TaskTabs } from "../task-nav";
 import { Board } from "./board";
@@ -25,6 +26,7 @@ export default async function BoardPage({ searchParams }: { searchParams: TaskFi
           assignees: r.assignees,
           dueDate: r.dueDate,
           overdue: r.overdue,
+          doneDelta: r.status === "COMPLETED" ? completionDelta(r.dueDate, r.completedAt) : null,
           priority: r.priority,
           canMove: me.role !== "USER" || r.createdById === me.id || (r.assigneeIds ?? []).includes(me.id),
         }))}
