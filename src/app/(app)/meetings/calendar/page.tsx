@@ -6,12 +6,21 @@ import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { requireUser } from "@/lib/auth";
 import { meetingsBetween, toBeScheduled } from "@/lib/meeting-queries";
 import { tasksDueBetween } from "@/lib/task-queries";
-import { fmtPlainDate, fmtTime, riyadh, riyadhParts, STATUS_CHIP, STATUS_LABEL, todayRiyadh } from "@/lib/meetings";
+import { fmtDay, fmtPlainDate, fmtTime, MODE_LABEL, riyadh, riyadhParts, STATUS_CHIP, STATUS_LABEL, todayRiyadh, type MeetingStatus } from "@/lib/meetings";
 import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
-type Search = { month?: string; view?: string; user?: string; group?: string; client?: string; tasks?: string };
+type Search = { month?: string; day?: string; view?: string; user?: string; group?: string; client?: string; tasks?: string };
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Small coloured dots for the month grid on phones, where chips are too narrow to read. */
+const STATUS_DOT: Record<MeetingStatus, string> = {
+  TO_BE_SCHEDULED: "bg-amber-400",
+  SCHEDULED: "bg-brand",
+  CONFIRMED: "bg-navy",
+  COMPLETED: "bg-emerald-500",
+  POSTPONED: "bg-slate-400",
+  CANCELLED: "bg-red-400",
+};
 
 const addDays = (date: string, n: number) => new Date(Date.parse(`${date}T00:00:00Z`) + n * 86400_000).toISOString().slice(0, 10);
 const shiftMonth = (ym: string, n: number) => {
@@ -23,8 +32,10 @@ const shiftMonth = (ym: string, n: number) => {
 export default async function CalendarPage({ searchParams }: { searchParams: Search }) {
   const me = await requireUser();
   const today = todayRiyadh();
-  const ym = /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : today.slice(0, 7);
-  const view = searchParams.view === "agenda" ? "agenda" : "month";
+  const view = searchParams.view === "agenda" || searchParams.view === "day" ? searchParams.view : "month";
+  // Day view: the chosen day (default today); its month is loaded as usual
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.day ?? "") ? searchParams.day! : today;
+  const ym = view === "day" ? day.slice(0, 7) : /^\d{4}-\d{2}$/.test(searchParams.month ?? "") ? searchParams.month! : today.slice(0, 7);
   const first = `${ym}-01`;
   const gridStart = addDays(first, -new Date(`${first}T00:00:00Z`).getUTCDay()); // weeks start Sunday
   const lastOfMonth = addDays(shiftMonth(ym, 1) + "-01", -1);
@@ -74,8 +85,9 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
     const d = riyadhParts(x.startAt!).date;
     byDay.set(d, [...(byDay.get(d) ?? []), x]);
   }
-  const keep = Object.entries(searchParams).filter(([k, v]) => v && k !== "month" && k !== "view") as [string, string][];
+  const keep = Object.entries(searchParams).filter(([k, v]) => v && k !== "month" && k !== "day" && k !== "view") as [string, string][];
   const href = (patch: Record<string, string>) => `/meetings/calendar?${new URLSearchParams({ ...Object.fromEntries(keep), month: ym, view, ...patch })}`;
+  const dayHref = (d: string) => `/meetings/calendar?${new URLSearchParams({ ...Object.fromEntries(keep), day: d, view: "day" })}`;
   const [y, mo] = ym.split("-").map(Number);
 
   return (
@@ -98,20 +110,40 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       />
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
-          <Link href={href({ month: shiftMonth(ym, -1) })} className="btn-secondary px-3" aria-label="Previous month">
-            ←
-          </Link>
-          <Link href={href({ month: today.slice(0, 7) })} className="btn-secondary">
-            Today
-          </Link>
-          <Link href={href({ month: shiftMonth(ym, 1) })} className="btn-secondary px-3" aria-label="Next month">
-            →
-          </Link>
-          <h2 className="ml-2 text-lg font-semibold text-navy">
-            {MONTHS[mo - 1]} {y}
-          </h2>
+          {view === "day" ? (
+            <>
+              <Link href={dayHref(addDays(day, -1))} className="btn-secondary px-3" aria-label="Previous day">
+                ←
+              </Link>
+              <Link href={dayHref(today)} className="btn-secondary">
+                Today
+              </Link>
+              <Link href={dayHref(addDays(day, 1))} className="btn-secondary px-3" aria-label="Next day">
+                →
+              </Link>
+              <h2 className="ml-2 text-lg font-semibold text-navy">{fmtDay(day)}</h2>
+            </>
+          ) : (
+            <>
+              <Link href={href({ month: shiftMonth(ym, -1) })} className="btn-secondary px-3" aria-label="Previous month">
+                ←
+              </Link>
+              <Link href={href({ month: today.slice(0, 7) })} className="btn-secondary">
+                Today
+              </Link>
+              <Link href={href({ month: shiftMonth(ym, 1) })} className="btn-secondary px-3" aria-label="Next month">
+                →
+              </Link>
+              <h2 className="ml-2 text-lg font-semibold text-navy">
+                {MONTHS[mo - 1]} {y}
+              </h2>
+            </>
+          )}
         </div>
         <div className="flex gap-1 rounded-md border border-slate-300 bg-white p-0.5 text-sm">
+          <Link href={dayHref(view === "day" ? day : ym === today.slice(0, 7) ? today : `${ym}-01`)} className={`rounded px-3 py-1 ${view === "day" ? "bg-navy text-white" : "text-slate-600"}`}>
+            Day
+          </Link>
           <Link href={href({ view: "month" })} className={`rounded px-3 py-1 ${view === "month" ? "bg-navy text-white" : "text-slate-600"}`}>
             Month
           </Link>
@@ -120,7 +152,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           </Link>
         </div>
       </div>
-<FilterBar keep={{ month: ym, view }} clearHref={`/meetings/calendar?month=${ym}&view=${view}`} active={countActive(searchParams, ["user", "group", "client", "tasks"])}>
+<FilterBar keep={view === "day" ? { day, view } : { month: ym, view }} clearHref={view === "day" ? `/meetings/calendar?day=${day}&view=day` : `/meetings/calendar?month=${ym}&view=${view}`} active={countActive(searchParams, ["user", "group", "client", "tasks"])}>
         <FilterField label="Person">
           <select name="user" defaultValue={searchParams.user ?? ""} className="input">
             <option value="">{me.role === "SUPER_ADMIN" ? "Everyone" : "All I can see"}</option>
@@ -158,7 +190,44 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
 
       <div className="grid gap-6 xl:grid-cols-4">
         <div className="xl:col-span-3">
-          {view === "month" ? (
+          {view === "day" ? (
+            <div className="card divide-y divide-slate-100">
+              {(byDay.get(day) ?? []).length === 0 && (tasksByDay.get(day) ?? []).length === 0 && (
+                <div className="px-4 py-10 text-center text-sm text-slate-500">Nothing on this day.</div>
+              )}
+              {(byDay.get(day) ?? []).map((x) => (
+                <Link key={x.id} href={`/meetings/${x.id}`} className="flex gap-3 px-4 py-3 hover:bg-slate-50">
+                  <div className="w-14 shrink-0 text-sm tabular-nums">
+                    <div className="font-semibold text-navy">{fmtTime(x.startAt)}</div>
+                    <div className="text-slate-400">{fmtTime(x.endAt)}</div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-slate-800">{x.title}</div>
+                    {x.client && x.client !== x.title && <div className="text-sm text-slate-600">{x.client}</div>}
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                      <span className={`rounded border px-1.5 py-0.5 ${STATUS_CHIP[x.status]}`}>{STATUS_LABEL[x.status]}</span>
+                      <span>{MODE_LABEL[x.mode]}</span>
+                      {x.location && <span>· {x.location}</span>}
+                    </div>
+                  </div>
+                </Link>
+              ))}
+              {(tasksByDay.get(day) ?? []).map((t) => (
+                <Link key={`t${t.id}`} href={`/tasks/${t.id}`} className="flex gap-3 px-4 py-3 hover:bg-slate-50">
+                  <div className="w-14 shrink-0 text-xs font-semibold uppercase text-slate-400">Task due</div>
+                  <div className="min-w-0 flex-1">
+                    <div className={`font-medium ${t.status === "COMPLETED" ? "text-emerald-700 line-through" : day < today ? "text-red-700" : "text-slate-800"}`}>☐ {t.title}</div>
+                    {t.client && <div className="text-sm text-slate-600">{t.client}</div>}
+                  </div>
+                </Link>
+              ))}
+              <div className="px-4 py-3">
+                <Link href={`/meetings/new?date=${day}`} className="link text-sm">
+                  + New meeting on this day
+                </Link>
+              </div>
+            </div>
+          ) : view === "month" ? (
             <div className="card overflow-hidden">
               <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold uppercase tracking-wide text-slate-500">
                 {DAYS.map((d) => (
@@ -175,15 +244,27 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
                   return (
                     <div
                       key={d}
-                      className={`group relative min-h-[6.5rem] border-b border-r border-slate-100 p-1.5 ${inMonth ? (weekend ? "bg-slate-50/60" : "bg-white") : "bg-slate-50 text-slate-400"}`}
+                      className={`group relative min-h-[3.5rem] border-b border-r border-slate-100 p-1 sm:min-h-[6.5rem] sm:p-1.5 ${inMonth ? (weekend ? "bg-slate-50/60" : "bg-white") : "bg-slate-50 text-slate-400"}`}
                     >
+                      {/* Phones: the whole cell opens the day */}
+                      <Link href={dayHref(d)} className="absolute inset-0 sm:hidden" aria-label={`Open ${d}`} />
                       <div className="mb-1 flex items-center justify-between">
-                        <span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs ${d === today ? "bg-brand font-bold text-white" : ""}`}>{Number(d.slice(8))}</span>
-                        <Link href={`/meetings/new?date=${d}`} className="rounded px-1 text-sm text-slate-400 opacity-0 hover:text-brand group-hover:opacity-100" aria-label={`New meeting on ${d}`}>
+                        <Link href={dayHref(d)} className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs hover:ring-1 hover:ring-brand ${d === today ? "bg-brand font-bold text-white" : ""}`}>
+                          {Number(d.slice(8))}
+                        </Link>
+                        <Link href={`/meetings/new?date=${d}`} className="hidden rounded px-1 text-sm text-slate-400 opacity-0 sm:inline hover:text-brand group-hover:opacity-100" aria-label={`New meeting on ${d}`}>
                           +
                         </Link>
                       </div>
-                      <div className="space-y-1">
+                      <div className="flex flex-wrap gap-1 px-0.5 sm:hidden">
+                        {list.map((x) => (
+                          <span key={x.id} className={`h-2 w-2 rounded-full ${STATUS_DOT[x.status]}`} />
+                        ))}
+                        {(tasksByDay.get(d) ?? []).map((t) => (
+                          <span key={`t${t.id}`} className={`h-2 w-2 rounded-full border ${t.dueDate!.slice(0, 10) < today && t.status !== "COMPLETED" ? "border-red-500" : "border-slate-400"}`} />
+                        ))}
+                      </div>
+                      <div className="hidden space-y-1 sm:block">
                         {list.slice(0, 4).map((x) => (
                           <Link key={x.id} href={`/meetings/${x.id}`} title={`${x.title} · ${STATUS_LABEL[x.status]}`} className={`block truncate rounded border px-1.5 py-0.5 text-[11px] leading-tight ${STATUS_CHIP[x.status]}`}>
                             <b>{fmtTime(x.startAt)}</b> {x.client ?? x.title}
@@ -200,7 +281,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
                           </Link>
                         ))}
                         {list.length + (tasksByDay.get(d)?.length ?? 0) > 4 && (
-                          <Link href={href({ view: "agenda" })} className="block px-1 text-[11px] text-slate-500">
+                          <Link href={dayHref(d)} className="block px-1 text-[11px] text-slate-500 hover:text-brand">
                             +{list.length + (tasksByDay.get(d)?.length ?? 0) - 4} more
                           </Link>
                         )}

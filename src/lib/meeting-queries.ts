@@ -98,7 +98,7 @@ export type MeetingRow = Awaited<ReturnType<typeof listMeetings>>[number];
 /** Meetings in a time window (for the calendar), visible to the user. */
 export async function meetingsBetween(me: SessionUser, from: Date, to: Date, extra?: SQL) {
   return db
-    .select({ id: m.id, title: m.title, startAt: m.startAt, endAt: m.endAt, status: m.status, client: schema.clients.name, priority: m.priority })
+    .select({ id: m.id, title: m.title, startAt: m.startAt, endAt: m.endAt, status: m.status, client: schema.clients.name, priority: m.priority, location: m.location, mode: m.mode })
     .from(m)
     .leftJoin(schema.clients, eq(m.clientId, schema.clients.id))
     .where(and(visibleTo(me), gte(m.startAt, from), lt(m.startAt, to), extra))
