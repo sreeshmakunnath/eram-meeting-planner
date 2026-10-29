@@ -142,7 +142,11 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
       if (!existing.some((e) => e.userId === userId)) await db.insert(schema.taskAssignees).values({ taskId, userId, viaGroupId });
     await db.delete(schema.taskGroups).where(eq(schema.taskGroups.taskId, taskId));
     if (groupIds.length) await db.insert(schema.taskGroups).values(groupIds.map((groupId) => ({ taskId, groupId })));
-    if (before && (added.length || removed.length)) await logTaskActivity(taskId, me.id, "ASSIGNEES_CHANGED", { added, removed });
+    if (before && (added.length || removed.length)) {
+      const named = await db.select({ id: schema.users.id, name: schema.users.fullName }).from(schema.users).where(inArray(schema.users.id, [...added, ...removed]));
+      const names = (ids: number[]) => ids.map((u) => named.find((n) => n.id === u)?.name ?? `#${u}`);
+      await logTaskActivity(taskId, me.id, "ASSIGNEES_CHANGED", { added: names(added), removed: names(removed) });
+    }
     await notifyTaskAssigned(taskId, added.filter((u) => u !== me.id), me.name, me.id);
 
     // Status / progress on the same form

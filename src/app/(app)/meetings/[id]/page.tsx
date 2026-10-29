@@ -19,6 +19,7 @@ import {
   STATUS_TONE,
   TYPE_LABEL,
 } from "@/lib/meetings";
+import { changedText } from "@/lib/activity-labels";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Meeting saved." },
@@ -35,7 +36,7 @@ const describe = (action: string, d: Record<string, unknown> | null) => {
     return [((d.added as string[]) ?? []).length ? `added ${(d.added as string[]).join(", ")}` : "", ((d.removed as string[]) ?? []).length ? `removed ${(d.removed as string[]).join(", ")}` : ""]
       .filter(Boolean)
       .join("; ");
-  if (action === "UPDATED") return `changed ${((d.changed as string[]) ?? []).join(", ")}`;
+  if (action === "UPDATED") return changedText(d);
   if (action === "CREATED") return d.status ? `as ${STATUS_LABEL[d.status as keyof typeof STATUS_LABEL]}` : "";
   return Object.entries(d)
     .map(([k, v]) => `${k}: ${v}`)

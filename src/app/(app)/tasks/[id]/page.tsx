@@ -1,4 +1,4 @@
-import { asc, desc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -10,6 +10,7 @@ import { addComment, addSubtask, deleteTask, setTaskStatus, toggleSubtask, updat
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeUsers } from "@/lib/queries";
+import { assigneeIdsIn, changedText, people as activityPeople } from "@/lib/activity-labels";
 import { canCommentOnTask, canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, completionDelta, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -55,6 +56,27 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
     .where(eq(schema.taskActivity.taskId, id))
     .orderBy(desc(schema.taskActivity.createdAt))
     .limit(50);
+  // Older "assignees changed" entries saved user ids: look their names up
+  const oldIds = assigneeIdsIn(activity);
+  const userNames = new Map(
+    oldIds.length ? (await db.select({ id: schema.users.id, name: schema.users.fullName }).from(schema.users).where(inArray(schema.users.id, oldIds))).map((u) => [u.id, u.name]) : [],
+  );
+  const describe = (action: string, d: Record<string, unknown> | null) => {
+    if (!d) return "";
+    if (action === "STATUS_CHANGED") return `${TASK_STATUS_LABEL[d.from as TaskStatus]} → ${TASK_STATUS_LABEL[d.to as TaskStatus]}`;
+    if (action === "PROGRESS") return `${d.from}% → ${d.to}%`;
+    if (action === "UPDATED") return changedText(d);
+    if (action === "ASSIGNEES_CHANGED") {
+      const added = activityPeople(d.added, userNames);
+      const removed = activityPeople(d.removed, userNames);
+      return [added.length ? `added ${added.join(", ")}` : "", removed.length ? `removed ${removed.join(", ")}` : ""].filter(Boolean).join("; ");
+    }
+    if (action === "SUBTASK_ADDED") return `"${d.subtask}" for ${d.assignedTo}`;
+    if (action === "MENTIONED") return ((d.users as string[]) ?? []).join(", ");
+    return Object.entries(d)
+      .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
+      .join(" · ");
+  };
   const overdue = !!task.dueDate && task.dueDate.slice(0, 10) < todayRiyadh() && OPEN_STATUSES.includes(task.status);
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
   const quick: [TaskStatus, string][] =
@@ -218,17 +240,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
                 <li key={a.id} className="flex justify-between gap-4 px-5 py-2 text-sm">
                   <span>
                     <b>{a.user ?? "System"}</b> · {labelize(a.action)}{" "}
-                    <span className="text-slate-500">
-                      {a.action === "STATUS_CHANGED"
-                        ? `${TASK_STATUS_LABEL[(a.details as { from: TaskStatus }).from]} → ${TASK_STATUS_LABEL[(a.details as { to: TaskStatus }).to]}`
-                        : a.action === "PROGRESS"
-                          ? `${(a.details as { from: number }).from}% → ${(a.details as { to: number }).to}%`
-                          : a.details
-                            ? Object.entries(a.details as Record<string, unknown>)
-                                .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
-                                .join(" · ")
-                            : ""}
-                    </span>
+                    <span className="text-slate-500">{describe(a.action, a.details as Record<string, unknown> | null)}</span>
                   </span>
                   <span className="whitespace-nowrap text-xs text-slate-500">{fmtDateTime(a.at)}</span>
                 </li>
