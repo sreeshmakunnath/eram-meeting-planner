@@ -1,0 +1,56 @@
+# NOT ACTIVE HERE: GitHub only runs workflows in .github/workflows/. To turn it on (e.g. in the company repo),
+# move this file to .github/workflows/db-backup.yml and add the two secrets below.
+#
+# Nightly backup of the Neon database: a full pg_dump, encrypted with a passphrase, kept 30 days as a workflow
+# artifact. Restore steps are in README.md ("Backups"). Needs two repository secrets:
+#   NEON_BACKUP_URL    the Neon connection string WITHOUT "-pooler" in the host (pg_dump needs a direct connection)
+#   BACKUP_PASSPHRASE  a long random passphrase; keep a copy somewhere safe, backups can't be opened without it
+name: Nightly database backup
+
+on:
+  schedule:
+    - cron: "30 21 * * *" # 00:30 Riyadh time
+  workflow_dispatch: # "Run workflow" button for an on-demand backup
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install the PostgreSQL 18 client (dumps any older server too)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y -qq postgresql-client-18
+
+      - name: Dump, check and encrypt
+        env:
+          DATABASE_URL: ${{ secrets.NEON_BACKUP_URL }}
+          PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          [ -n "$DATABASE_URL" ] || { echo "::error::Secret NEON_BACKUP_URL is not set"; exit 1; }
+          [ -n "$PASSPHRASE" ] || { echo "::error::Secret BACKUP_PASSPHRASE is not set"; exit 1; }
+          bin=/usr/lib/postgresql/18/bin
+          stamp=$(TZ=Asia/Riyadh date +%Y-%m-%d_%H%M)
+          $bin/pg_dump "$DATABASE_URL" --format=custom --no-owner --no-privileges --file=db.dump
+          # A dump that can't be listed can't be restored: fail loudly instead of keeping a broken backup
+          tables=$($bin/pg_restore --list db.dump | grep -c " TABLE DATA ")
+          echo "Backed up $tables tables, $(du -h db.dump | cut -f1)"
+          [ "$tables" -gt 10 ] || { echo "::error::Only $tables tables in the dump"; exit 1; }
+          gpg --batch --yes --pinentry-mode loopback --passphrase "$PASSPHRASE" --symmetric --cipher-algo AES256 \
+            --output "eram-planner-$stamp.dump.gpg" db.dump
+          rm db.dump
+          echo "STAMP=$stamp" >> "$GITHUB_ENV"
+
+      - name: Keep for 30 days
+        uses: actions/upload-artifact@v4
+        with:
+          name: eram-planner-db-${{ env.STAMP }}
+          path: eram-planner-*.dump.gpg
+          retention-days: 30
+          if-no-files-found: error

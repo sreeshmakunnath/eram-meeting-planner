@@ -105,6 +105,27 @@ Sign in with `admin` / `Admin@12345` (set by `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PA
 
 **Data location:** Vercel and Neon run in US / EU / Asia-Pacific regions. Check with IT whether ERAM data must stay in Saudi Arabia before going to production.
 
+## Backups
+
+Two layers:
+- **Neon instant restore:** rewinds the database to any moment in the last 6 hours on the Free plan (7 days on Launch, 30 on Scale). Neon console → your branch → Restore.
+- **Nightly backup** (`ops/db-backup.yml`, **switched off until moved**): once turned on, every night at 00:30 Riyadh time GitHub Actions takes a full `pg_dump`, checks it can be read, encrypts it (AES-256, with a passphrase) and keeps it 30 days. GitHub emails the repo owner if a run fails.
+
+**Turn it on** (in the company repo): move `ops/db-backup.yml` to `.github/workflows/db-backup.yml`, then add two secrets (GitHub → repo → Settings → Secrets and variables → Actions → New repository secret):
+- `NEON_BACKUP_URL`: the Neon connection string with the **direct** host, i.e. without `-pooler` (Neon console → Connect → turn off "Connection pooling").
+- `BACKUP_PASSPHRASE`: a long random passphrase (`openssl rand -base64 32`). Store a copy in the company password manager: without it no backup can be opened.
+
+Then Actions → "Nightly database backup" → **Run workflow** once to check it works.
+
+**Download a backup:** Actions → a run of "Nightly database backup" → Artifacts → `eram-planner-db-<date>` (a zip with a `.dump.gpg` file). An IT admin can copy these into the company's own backup storage for longer retention.
+
+**Restore** (into a new, empty database first, e.g. a new Neon branch; never straight over production):
+```bash
+gpg --decrypt eram-planner-2026-10-29_0030.dump.gpg > planner.dump      # asks for the passphrase
+pg_restore --no-owner --no-privileges --dbname "<target database URL>" planner.dump
+```
+Check the data in the restored database, then point `DATABASE_URL` at it (or copy what's needed back).
+
 ## Project layout
 
 ```
