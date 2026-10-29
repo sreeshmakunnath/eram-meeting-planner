@@ -10,6 +10,8 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "db:demo": "tsx src/db/demo.ts",
+    "db:demo:remove": "tsx src/db/demo.ts --remove",
     "db:studio": "drizzle-kit studio",
     "vercel-build": "npm run db:migrate && next build"
   },

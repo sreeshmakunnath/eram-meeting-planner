@@ -105,6 +105,15 @@ Sign in with `admin` / `Admin@12345` (set by `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PA
 
 **Data location:** Vercel and Neon run in US / EU / Asia-Pacific regions. Check with IT whether ERAM data must stay in Saudi Arabia before going to production.
 
+## Demo data
+
+`npm run db:demo` adds a ready-made demo to the database in `.env` (one transaction, all or nothing):
+- Business units **Eram Africa** and **Source India** (reused if they exist, created if not)
+- Per unit a BU Admin and a User who reports to them: `amina@demo.eram.test` / `daniel@demo.eram.test` (Africa), `rahul@demo.eram.test` / `priya@demo.eram.test` (India). Password `Demo@12345`, or set `DEMO_PASSWORD`.
+- Per unit 3 prospect clients ("… (Demo)") with a contact and BD steps at different stages, 6 meetings around today (one held, upcoming ones, one to be scheduled, one internal) and general tasks (one overdue, one with a subtask)
+
+`npm run db:demo:remove` takes it all out again: the demo users and everything they organised or created (also during the demo), and the units the demo created unless real data uses them by then. It refuses to add twice.
+
 ## Backups
 
 Two layers:
