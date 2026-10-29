@@ -57,7 +57,7 @@ export async function ClientForm({ me, client, buIds = [], limited = false }: { 
         <Field label="Website">
           <input name="website" className="input" defaultValue={client?.website ?? ""} placeholder="https://" maxLength={200} />
         </Field>
-        <Field label="BD stage" hint="Feeds the target schedule report.">
+        <Field label="BD stage" hint="Shown on the BD tracker.">
           <select name="bdStage" className="input" defaultValue={client?.bdStage ?? ""}>
             <option value="">—</option>
             {BD_STAGES.map((s) => (

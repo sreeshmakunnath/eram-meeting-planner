@@ -1,13 +1,24 @@
-import { and, asc, eq, inArray, isNotNull, isNull, ne, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { clientVisibleTo } from "./access";
-import type { SessionUser } from "./auth";
+import { clientInMyBus, teamOf } from "./access";
+import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 import { todayRiyadh } from "./meetings";
 import { OPEN_STATUSES, taskVisibleTo, type TaskCategory, type TaskStatus } from "./tasks";
 
 export const BD_CATEGORIES: TaskCategory[] = ["MARKET_RESEARCH", "MIR_REPORT", "APPROACH", "FOLLOW_UP"];
 
-export type Cell = { taskId: number; due: string | null; status: TaskStatus; owners: string; overdue: boolean } | null;
+/** `canOpen`: the viewer may open the task itself (the tracker shows every BD task of the clients it lists). */
+export type Cell = { taskId: number; due: string | null; status: TaskStatus; owners: string; overdue: boolean; canOpen: boolean } | null;
+
+/**
+ * Who sees a client on the BD tracker: Super Admins, Admins of the client's business units, the client's account
+ * owner and the owner's managers (any level). Other Users don't, even when they can see the client itself.
+ */
+export function trackerVisibleTo(me: SessionUser): SQL | undefined {
+  if (isSuperAdmin(me)) return undefined;
+  const c = schema.clients;
+  return or(isAdmin(me) ? clientInMyBus(me, c.id) : undefined, eq(c.accountOwnerId, me.id), sql`${c.accountOwnerId} in ${teamOf(me.id)}`);
+}
 
 /**
  * The BD Target Schedule: one row per target company, columns built from that client's tasks in the
@@ -16,14 +27,33 @@ export type Cell = { taskId: number; due: string | null; status: TaskStatus; own
 export async function targetScheduleRows(me: SessionUser, batch?: string) {
   const today = todayRiyadh();
   const clients = await db
-    .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, batch: schema.clients.targetBatch, notes: schema.clients.notes, bdStage: schema.clients.bdStage, accountOwnerId: schema.clients.accountOwnerId })
+    .select({
+      id: schema.clients.id,
+      name: schema.clients.name,
+      country: schema.clients.country,
+      city: schema.clients.city,
+      batch: schema.clients.targetBatch,
+      notes: schema.clients.notes,
+      bdStage: schema.clients.bdStage,
+      accountOwnerId: schema.clients.accountOwnerId,
+      accountOwner: schema.users.fullName,
+    })
     .from(schema.clients)
-    .where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(me), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
+    .leftJoin(schema.users, eq(schema.clients.accountOwnerId, schema.users.id))
+    .where(and(ne(schema.clients.status, "INACTIVE"), trackerVisibleTo(me), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
     .orderBy(asc(schema.clients.targetBatch), asc(schema.clients.name));
   const ids = clients.map((c) => c.id);
   const tasks = ids.length
     ? await db
-        .select({ id: schema.tasks.id, clientId: schema.tasks.clientId, category: schema.tasks.category, status: schema.tasks.status, dueDate: schema.tasks.dueDate, createdAt: schema.tasks.createdAt })
+        .select({
+          id: schema.tasks.id,
+          clientId: schema.tasks.clientId,
+          category: schema.tasks.category,
+          status: schema.tasks.status,
+          dueDate: schema.tasks.dueDate,
+          createdAt: schema.tasks.createdAt,
+          canOpen: taskVisibleTo(me) ? sql<boolean>`(${taskVisibleTo(me)})` : sql<boolean>`true`,
+        })
         .from(schema.tasks)
         .where(
           and(
@@ -32,7 +62,6 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
             ne(schema.tasks.status, "CANCELLED"),
             isNull(schema.tasks.sourceBriefId), // brief actions are tracked as tasks, not as BD schedule steps
             isNull(schema.tasks.parentTaskId),
-            taskVisibleTo(me),
           ),
         )
     : [];
@@ -54,6 +83,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
       status: t.status,
       owners: owners.filter((o) => o.taskId === t.id).map((o) => o.name).join(", "),
       overdue: !!due && due < today && OPEN_STATUSES.includes(t.status),
+      canOpen: !!t.canOpen,
     };
   };
   return clients.map((c) => {

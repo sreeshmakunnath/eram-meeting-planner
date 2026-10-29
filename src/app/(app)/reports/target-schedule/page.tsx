@@ -1,26 +1,38 @@
 import Link from "next/link";
-import { Empty, PageHeader } from "@/components/ui";
+import { Badge, Empty, PageHeader } from "@/components/ui";
 import { createBdTasks, importTargetSchedule } from "@/lib/actions/target";
 import { canManageClient } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
 import { activeUsers } from "@/lib/queries";
 import { fmtPlainDate } from "@/lib/meetings";
-import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
+import { CATEGORY_LABEL, TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
 import { batches, targetScheduleRows, type Cell, type TargetRow } from "@/lib/target-schedule";
 import { BdTasksDialog, type BdTaskDefault } from "./bd-tasks-dialog";
 import { TargetImportForm } from "./import-form";
 
-function Due({ c }: { c: Cell }) {
-  if (!c) return <span className="text-slate-300">—</span>;
+/** One BD step: due date, owner and current status. */
+function Step({ c }: { c: Cell }) {
+  if (!c) return <span className="text-xs text-slate-300">Not started yet</span>;
+  const due = (
+    <span className={`whitespace-nowrap ${c.overdue ? "font-semibold text-red-600" : c.status === "COMPLETED" ? "text-emerald-700" : "text-slate-700"}`}>
+      {c.due ? fmtPlainDate(c.due) : "No due date"}
+      {c.overdue && " · overdue"}
+    </span>
+  );
   return (
-    <Link href={`/tasks/${c.taskId}`} className={`whitespace-nowrap hover:underline ${c.overdue ? "font-semibold text-red-600" : c.status === "COMPLETED" ? "text-emerald-700" : ""}`}>
-      {c.due ? fmtPlainDate(c.due) : "No date"}
-      {c.status === "COMPLETED" && " ✓"}
-    </Link>
+    <div className="space-y-0.5">
+      {c.canOpen ? (
+        <Link href={`/tasks/${c.taskId}`} className="hover:underline">
+          {due}
+        </Link>
+      ) : (
+        due
+      )}
+      <div className="text-xs text-slate-600">{c.owners || "Unassigned"}</div>
+      <Badge tone={TASK_STATUS_TONE[c.status]}>{TASK_STATUS_LABEL[c.status]}</Badge>
+    </div>
   );
 }
-const statusCls = (s: string | null) =>
-  s === "COMPLETED" ? "text-emerald-700" : s === "ON_HOLD" ? "text-amber-700" : s === "NOT_STARTED" || !s ? "text-slate-500" : "text-brand-600";
 
 /** BD steps in schedule order, with default due dates spread a week apart from today. */
 const BD_STEPS = [
@@ -44,13 +56,13 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
   const me = await requireUser();
   const [rows, batchList, users] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches(), activeUsers()]);
   const people = users.map(({ id, fullName }) => ({ id, fullName }));
-  // Who may create BD tasks on each row (Admins of the client's units, the account owner)
+  // Who may create BD tasks on each row (Admins of the client's units, the account owner and their managers)
   const manageable = new Set((await Promise.all(rows.map(async (r) => ((await canManageClient(me, r)) ? r.id : null)))).filter((id) => id !== null));
   return (
     <>
       <PageHeader
-        title="BD Target Schedule"
-        subtitle={`${searchParams.batch ?? "All batches"} · built from each company's Market research, MIR, Approach and Follow-up tasks. Red = overdue.`}
+        title="BD Tracker"
+        subtitle={`${searchParams.batch ?? "All batches"} · each company's four BD steps: due date, owner and status. Shown to account owners, their managers and Admins.`}
         actions={
           <a href={`/api/reports/target-schedule${searchParams.batch ? `?batch=${encodeURIComponent(searchParams.batch)}` : ""}`} className="btn-secondary">
             Export Excel
@@ -71,22 +83,16 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
       </div>
       <div className="card overflow-x-auto">
         {rows.length === 0 ? (
-          <Empty>No target companies yet. Import a schedule, or set a batch on a client.</Empty>
+          <Empty>No target companies for you here. The tracker lists clients you own, your team owns, or (for Admins) your business units&apos; clients.</Empty>
         ) : (
           <table className="table">
             <thead>
               <tr>
                 <th>#</th>
                 <th>Company</th>
-                <th>Location</th>
-                <th>Market research deadline</th>
-                <th>MIR report deadline</th>
-                <th>Research / MIR owner</th>
-                <th>Research / MIR status</th>
-                <th>Approach deadline</th>
-                <th>Follow-up deadline</th>
-                <th>Approach owner</th>
-                <th>Approach status</th>
+                {BD_STEPS.map((s) => (
+                  <th key={s.cell}>{CATEGORY_LABEL[s.category]}</th>
+                ))}
                 <th>Notes</th>
               </tr>
             </thead>
@@ -98,25 +104,14 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
                     <Link href={`/clients/${r.id}?tab=tasks`} className="link">
                       {r.name}
                     </Link>
-                    {r.batch && !searchParams.batch && <div className="text-xs text-slate-500">{r.batch}</div>}
+                    <div className="text-xs text-slate-500">{[r.location, r.batch && !searchParams.batch ? r.batch : null].filter(Boolean).join(" · ")}</div>
+                    <div className="text-xs text-slate-500">Owner: {r.accountOwner ?? "—"}</div>
                   </td>
-                  <td className="whitespace-nowrap">{r.location}</td>
-                  <td>
-                    <Due c={r.research} />
-                  </td>
-                  <td>
-                    <Due c={r.mir} />
-                  </td>
-                  <td className="text-slate-600">{r.researchOwner || "—"}</td>
-                  <td className={statusCls(r.researchStatus)}>{r.researchStatus ? TASK_STATUS_LABEL[r.researchStatus] : "—"}</td>
-                  <td>
-                    <Due c={r.approach} />
-                  </td>
-                  <td>
-                    <Due c={r.followUp} />
-                  </td>
-                  <td className="text-slate-600">{r.approachOwner || "—"}</td>
-                  <td className={statusCls(r.approachStatus)}>{r.approachStatus ? TASK_STATUS_LABEL[r.approachStatus] : "—"}</td>
+                  {BD_STEPS.map((s) => (
+                    <td key={s.cell} className="min-w-[9rem] align-top">
+                      <Step c={r[s.cell]} />
+                    </td>
+                  ))}
                   <td className="min-w-[10rem] text-xs text-slate-500">
                     {r.notes}
                     {manageable.has(r.id) && missingBdTasks(r).length > 0 && (
