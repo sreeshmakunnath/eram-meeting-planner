@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { Badge, Empty, PageHeader } from "@/components/ui";
 import { createBdTasks, importTargetSchedule } from "@/lib/actions/target";
-import { canManageClient } from "@/lib/access";
-import { requireUser } from "@/lib/auth";
+import { canManageClient, teamIds } from "@/lib/access";
+import { isAdmin, requireUser } from "@/lib/auth";
 import { activeUsers } from "@/lib/queries";
 import { fmtPlainDate } from "@/lib/meetings";
 import { CATEGORY_LABEL, TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
@@ -54,7 +54,7 @@ function missingBdTasks(r: TargetRow): BdTaskDefault[] {
 
 export default async function TargetSchedulePage({ searchParams }: { searchParams: { batch?: string } }) {
   const me = await requireUser();
-  const [rows, batchList, users] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches(), activeUsers()]);
+  const [rows, batchList, users, team] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches(), activeUsers(), teamIds(me.id)]);
   const people = users.map(({ id, fullName }) => ({ id, fullName }));
   // Who may create BD tasks on each row (Admins of the client's units, the account owner and their managers)
   const manageable = new Set((await Promise.all(rows.map(async (r) => ((await canManageClient(me, r)) ? r.id : null)))).filter((id) => id !== null));
@@ -64,9 +64,16 @@ export default async function TargetSchedulePage({ searchParams }: { searchParam
         title="BD Tracker"
         subtitle={`${searchParams.batch ?? "All batches"} · each company's four BD steps: due date, owner and status. Shown to account owners, their managers and Admins.`}
         actions={
-          <a href={`/api/reports/target-schedule${searchParams.batch ? `?batch=${encodeURIComponent(searchParams.batch)}` : ""}`} className="btn-secondary">
-            Export Excel
-          </a>
+          <>
+            {(isAdmin(me) || team.length > 0) && (
+              <a href="/bd-report" className="btn-secondary">
+                Monthly report
+              </a>
+            )}
+            <a href={`/api/reports/target-schedule${searchParams.batch ? `?batch=${encodeURIComponent(searchParams.batch)}` : ""}`} className="btn-secondary">
+              Export Excel
+            </a>
+          </>
         }
       />
       {me.role === "SUPER_ADMIN" && <TargetImportForm action={importTargetSchedule} />}

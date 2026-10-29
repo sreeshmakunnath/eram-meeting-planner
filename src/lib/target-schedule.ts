@@ -8,7 +8,7 @@ import { OPEN_STATUSES, taskVisibleTo, type TaskCategory, type TaskStatus } from
 export const BD_CATEGORIES: TaskCategory[] = ["MARKET_RESEARCH", "MIR_REPORT", "APPROACH", "FOLLOW_UP"];
 
 /** `canOpen`: the viewer may open the task itself (the tracker shows every BD task of the clients it lists). */
-export type Cell = { taskId: number; due: string | null; status: TaskStatus; owners: string; overdue: boolean; canOpen: boolean } | null;
+export type Cell = { taskId: number; due: string | null; status: TaskStatus; owners: string; overdue: boolean; canOpen: boolean; completedAt: Date | null } | null;
 
 /**
  * Who sees a client on the BD tracker: Super Admins, Admins of the client's business units, the client's account
@@ -24,7 +24,10 @@ export function trackerVisibleTo(me: SessionUser): SQL | undefined {
  * The BD Target Schedule: one row per target company, columns built from that client's tasks in the
  * Market research / MIR report / Approach / Follow-up categories (latest non-cancelled task of each).
  */
-export async function targetScheduleRows(me: SessionUser, batch?: string) {
+/** Narrows the tracker for the monthly BD report: one business unit's clients, or the clients a manager's team owns. */
+export type ReportScope = { bu: number } | { team: true };
+
+export async function targetScheduleRows(me: SessionUser, batch?: string, scope?: ReportScope) {
   const today = todayRiyadh();
   const clients = await db
     .select({
@@ -40,7 +43,17 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
     })
     .from(schema.clients)
     .leftJoin(schema.users, eq(schema.clients.accountOwnerId, schema.users.id))
-    .where(and(ne(schema.clients.status, "INACTIVE"), trackerVisibleTo(me), batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT"))))
+    .where(
+      and(
+        ne(schema.clients.status, "INACTIVE"),
+        trackerVisibleTo(me),
+        scope && "bu" in scope
+          ? sql`exists (select 1 from client_business_units cb where cb.client_id = ${schema.clients.id} and cb.business_unit_id = ${scope.bu})`
+          : undefined,
+        scope && "team" in scope ? or(eq(schema.clients.accountOwnerId, me.id), sql`${schema.clients.accountOwnerId} in ${teamOf(me.id)}`) : undefined,
+        batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT")),
+      ),
+    )
     .orderBy(asc(schema.clients.targetBatch), asc(schema.clients.name));
   const ids = clients.map((c) => c.id);
   const tasks = ids.length
@@ -52,6 +65,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
           status: schema.tasks.status,
           dueDate: schema.tasks.dueDate,
           createdAt: schema.tasks.createdAt,
+          completedAt: schema.tasks.completedAt,
           canOpen: taskVisibleTo(me) ? sql<boolean>`(${taskVisibleTo(me)})` : sql<boolean>`true`,
         })
         .from(schema.tasks)
@@ -84,6 +98,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string) {
       owners: owners.filter((o) => o.taskId === t.id).map((o) => o.name).join(", "),
       overdue: !!due && due < today && OPEN_STATUSES.includes(t.status),
       canOpen: !!t.canOpen,
+      completedAt: t.completedAt,
     };
   };
   return clients.map((c) => {
