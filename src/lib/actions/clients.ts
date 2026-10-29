@@ -1,12 +1,13 @@
 "use server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { canApproveClient, canManageClient, canManageContact, canSeeClient, mergeBuIds } from "@/lib/access";
-import { isAdmin, requireAdmin, requireUser, type SessionUser } from "@/lib/auth";
+import { notify } from "@/lib/notifications";
+import { canApproveClient, canManageClient, canManageContact, canSeeClient, mergeBuIds, usersWhoCanSeeClient } from "@/lib/access";
+import { isAdmin, requireAdmin, requireSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { assertClientName, clientNameMatches, type ClientNameMatches } from "@/lib/client-names";
 import { BD_STAGES, CLIENT_STATUSES, CLIENT_TYPES } from "@/lib/queries";
@@ -125,11 +126,13 @@ export async function addContact(clientId: number, _: ActionState, fd: FormData)
     if (email && !isEmail(email)) throw new FormError("Enter a valid email.");
     const isPrimary = fd.get("isPrimary") === "on";
     if (isPrimary) await db.update(schema.clientContacts).set({ isPrimary: false }).where(eq(schema.clientContacts.clientId, clientId));
+    const sharing = await readSharing(fd, clientId, me.id);
     const [c] = await db
       .insert(schema.clientContacts)
-      .values({ clientId, name: req(fd, "name", "Contact name"), designation: str(fd, "designation"), email, phone: str(fd, "phone"), isPrimary, ownerId: me.id, shared: fd.get("shared") === "on" })
+      .values({ clientId, name: req(fd, "name", "Contact name"), designation: str(fd, "designation"), email, phone: str(fd, "phone"), isPrimary, ownerId: me.id, shared: sharing.shared })
       .returning();
-    await audit(me.id, "CONTACT_ADDED", "client", clientId, { contactId: c.id, name: c.name, shared: c.shared });
+    await saveShares(c.id, sharing.userIds, me, clientId, c.name);
+    await audit(me.id, "CONTACT_ADDED", "client", clientId, { contactId: c.id, name: c.name, visibility: sharing.visibility, users: sharing.userIds });
     revalidatePath(`/clients/${clientId}`);
     return { ok: `Added ${c.name}.` };
   } catch (e) {
@@ -156,20 +159,71 @@ async function loadContact(me: SessionUser, clientId: number, contactId: number)
   return contact;
 }
 
-/** Private ⇄ shared with everyone who can see the client. */
-export async function setContactShared(clientId: number, contactId: number, shared: boolean) {
+type Visibility = "private" | "selected" | "everyone";
+
+/**
+ * The sharing picked on a contact form: private, selected people (only people who can see the client; the person
+ * adding it doesn't need listing) or everyone who can see the client.
+ */
+async function readSharing(fd: FormData, clientId: number, ownerId: number | null) {
+  const v = str(fd, "visibility");
+  const visibility: Visibility = v === "selected" || v === "everyone" ? v : "private";
+  if (visibility !== "selected") return { visibility, shared: visibility === "everyone", userIds: [] as number[] };
+  const eligible = new Set((await usersWhoCanSeeClient(clientId)).map((u) => u.id));
+  const userIds = [...new Set(ints(fd, "shareUserIds"))].filter((id) => id !== ownerId && eligible.has(id));
+  if (!userIds.length) throw new FormError("Tick at least one person to share with, or choose Private.");
+  return { visibility, shared: false, userIds };
+}
+
+/** Replaces who a contact is shared with, and tells the people newly added. */
+async function saveShares(contactId: number, userIds: number[], me: SessionUser, clientId: number, contactName: string) {
+  const before = (await db.select({ id: schema.contactShares.userId }).from(schema.contactShares).where(eq(schema.contactShares.contactId, contactId))).map((r) => r.id);
+  const removed = before.filter((id) => !userIds.includes(id));
+  if (removed.length) await db.delete(schema.contactShares).where(and(eq(schema.contactShares.contactId, contactId), inArray(schema.contactShares.userId, removed)));
+  const added = userIds.filter((id) => !before.includes(id));
+  if (added.length) {
+    await db.insert(schema.contactShares).values(added.map((userId) => ({ contactId, userId })));
+    const [client] = await db.select({ name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, clientId));
+    await notify(added, { kind: "CONTACT_SHARED", title: `${me.name} shared a contact with you: ${contactName} (${client?.name ?? "client"})`, href: `/clients/${clientId}`, actorId: me.id });
+  }
+}
+
+/** Changes a contact's sharing: private, selected people, or everyone who can see the client. */
+export async function setContactSharing(clientId: number, contactId: number, fd: FormData) {
   const me = await requireUser();
-  await loadContact(me, clientId, contactId);
-  await db.update(schema.clientContacts).set({ shared }).where(eq(schema.clientContacts.id, contactId));
-  await audit(me.id, shared ? "CONTACT_SHARED" : "CONTACT_MADE_PRIVATE", "client", clientId, { contactId });
+  const contact = await loadContact(me, clientId, contactId);
+  let sharing: Awaited<ReturnType<typeof readSharing>>;
+  try {
+    sharing = await readSharing(fd, clientId, contact.ownerId);
+  } catch {
+    redirect(`/clients/${clientId}?msg=sharefail`);
+  }
+  await db.update(schema.clientContacts).set({ shared: sharing.shared }).where(eq(schema.clientContacts.id, contactId));
+  await saveShares(contactId, sharing.userIds, me, clientId, contact.name);
+  await audit(me.id, "CONTACT_SHARING_CHANGED", "client", clientId, { contactId, visibility: sharing.visibility, users: sharing.userIds });
   revalidatePath(`/clients/${clientId}`);
 }
 
 export async function deleteContact(clientId: number, contactId: number) {
   const me = await requireUser();
   await loadContact(me, clientId, contactId);
-  await db.delete(schema.clientContacts).where(and(eq(schema.clientContacts.id, contactId), eq(schema.clientContacts.clientId, clientId)));
+  // Only flagged: a Super Admin can still see and restore it (e.g. when someone deletes contacts before leaving)
+  await db
+    .update(schema.clientContacts)
+    .set({ deletedAt: new Date(), deletedById: me.id, isPrimary: false })
+    .where(and(eq(schema.clientContacts.id, contactId), eq(schema.clientContacts.clientId, clientId)));
   await audit(me.id, "CONTACT_DELETED", "client", clientId, { contactId });
+  revalidatePath(`/clients/${clientId}`);
+}
+
+/** Super Admin: bring back a deleted contact, as it was (private or shared). */
+export async function restoreContact(clientId: number, contactId: number) {
+  const me = await requireSuperAdmin();
+  await db
+    .update(schema.clientContacts)
+    .set({ deletedAt: null, deletedById: null })
+    .where(and(eq(schema.clientContacts.id, contactId), eq(schema.clientContacts.clientId, clientId)));
+  await audit(me.id, "CONTACT_RESTORED", "client", clientId, { contactId });
   revalidatePath(`/clients/${clientId}`);
 }
 

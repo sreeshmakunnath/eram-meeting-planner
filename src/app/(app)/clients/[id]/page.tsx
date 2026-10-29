@@ -1,25 +1,27 @@
-import { and, asc, desc, eq, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Empty, Field, fmtDateTime, labelize, Notice, PageHeader, statusTone, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
-import { addContact, approveClient, deleteContact, mergeClient, setContactShared, setPrimaryContact } from "@/lib/actions/clients";
-import { canApproveClient, canManageClient, canSeeClient, clientVisibleTo, contactVisibleTo } from "@/lib/access";
-import { isAdmin, requireUser } from "@/lib/auth";
+import { addContact, approveClient, deleteContact, mergeClient, restoreContact, setContactSharing, setPrimaryContact } from "@/lib/actions/clients";
+import { canApproveClient, canManageClient, canSeeClient, clientVisibleTo, contactVisibleTo, usersWhoCanSeeClient } from "@/lib/access";
+import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 import { listMeetings } from "@/lib/meeting-queries";
 import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtPlainDate, fmtTime, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
 import { isSimilar } from "@/lib/similar";
+import { SharingFields } from "./sharing-fields";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Client saved." },
   approved: { tone: "ok", text: "Client approved and now available in dropdowns." },
   merged: { tone: "ok", text: "Duplicate merged into this client; its contacts were moved here." },
   mergefail: { tone: "error", text: "Pick a different client to merge into." },
+  sharefail: { tone: "error", text: "Tick at least one person to share with, or choose Private." },
   denied: { tone: "error", text: "You don't have permission to do that." },
 };
 
@@ -64,9 +66,32 @@ export default async function ClientPage({ params, searchParams }: { params: { i
       rows.map((r) => ({
         ...r.contact,
         owner: r.owner,
-        canManage: r.contact.ownerId === me.id || client.accountOwnerId === me.id || (r.contact.shared && editable),
+        canManage: isSuperAdmin(me) || r.contact.ownerId === me.id || client.accountOwnerId === me.id || (r.contact.shared && editable),
       })),
     );
+  // Who each contact is shared with individually, and who it could be shared with (people who can see the client)
+  const shares = contacts.length
+    ? await db
+        .select({ contactId: schema.contactShares.contactId, userId: schema.contactShares.userId, name: schema.users.fullName })
+        .from(schema.contactShares)
+        .innerJoin(schema.users, eq(schema.contactShares.userId, schema.users.id))
+        .where(inArray(schema.contactShares.contactId, contacts.map((c) => c.id)))
+        .orderBy(asc(schema.users.fullName))
+    : [];
+  const sharedWith = (contactId: number) => shares.filter((s) => s.contactId === contactId);
+  const viewers = (searchParams.tab ?? "contacts") === "contacts" ? await usersWhoCanSeeClient(id) : [];
+  // Super Admins: deleted contacts, to restore
+  const deletedBy = alias(schema.users, "deleted_by");
+  const deletedContacts =
+    isSuperAdmin(me) && (searchParams.tab ?? "contacts") === "contacts"
+      ? await db
+          .select({ contact: schema.clientContacts, owner: owner.fullName, deletedBy: deletedBy.fullName })
+          .from(schema.clientContacts)
+          .leftJoin(owner, eq(schema.clientContacts.ownerId, owner.id))
+          .leftJoin(deletedBy, eq(schema.clientContacts.deletedById, deletedBy.id))
+          .where(and(eq(schema.clientContacts.clientId, id), isNotNull(schema.clientContacts.deletedAt)))
+          .orderBy(desc(schema.clientContacts.deletedAt))
+      : [];
   const tab = searchParams.tab ?? "contacts";
   const msg = searchParams.msg ? messages[searchParams.msg] : undefined;
   const base = `/clients/${id}`;
@@ -224,7 +249,18 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                           <td>{c.email ? <a href={`mailto:${c.email}`} className="link">{c.email}</a> : "—"}</td>
                           <td>{c.phone ?? "—"}</td>
                           <td className="whitespace-nowrap">
-                            {c.shared ? <Badge tone="green">Shared</Badge> : <Badge>Private</Badge>}
+                            {c.shared ? (
+                              <Badge tone="green">Everyone</Badge>
+                            ) : sharedWith(c.id).length ? (
+                              <span title={sharedWith(c.id).map((s) => s.name).join(", ")}>
+                                <Badge tone="blue">Shared with {sharedWith(c.id).length}</Badge>
+                              </span>
+                            ) : (
+                              <Badge>Private</Badge>
+                            )}
+                            {!c.shared && sharedWith(c.id).length > 0 && (
+                              <div className="max-w-[14rem] truncate text-xs text-slate-500">{sharedWith(c.id).map((s) => s.name).join(", ")}</div>
+                            )}
                             {c.owner && <div className="text-xs text-slate-500">Added by {c.ownerId === me.id ? "you" : c.owner}</div>}
                           </td>
                           <td className="whitespace-nowrap text-right">
@@ -234,9 +270,17 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                               </form>
                             )}
                             {c.canManage && (
-                              <form action={setContactShared.bind(null, id, c.id, !c.shared)} className="ml-3 inline">
-                                <button className="text-xs text-brand hover:underline">{c.shared ? "Make private" : "Share"}</button>
-                              </form>
+                              <details className="relative ml-3 inline-block text-left">
+                                <summary className="cursor-pointer list-none text-xs text-brand hover:underline">Sharing…</summary>
+                                <form action={setContactSharing.bind(null, id, c.id)} className="card mt-2 w-72 space-y-3 whitespace-normal p-3 shadow-lg">
+                                  <SharingFields
+                                    visibility={c.shared ? "everyone" : sharedWith(c.id).length ? "selected" : "private"}
+                                    selected={sharedWith(c.id).map((s) => s.userId)}
+                                    people={viewers.filter((v) => v.id !== c.ownerId)}
+                                  />
+                                  <button className="btn-primary w-full py-1.5 text-sm">Save sharing</button>
+                                </form>
+                              </details>
                             )}
                             {c.canManage && (
                               <form action={deleteContact.bind(null, id, c.id)} className="ml-3 inline">
@@ -250,6 +294,31 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                   </table>
                 )}
               </div>
+              {deletedContacts.length > 0 && (
+                <details className="card">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-600">
+                    Deleted contacts ({deletedContacts.length}) <span className="font-normal text-slate-400">· only Super Admins see these</span>
+                  </summary>
+                  <ul className="divide-y divide-slate-100 border-t border-slate-100">
+                    {deletedContacts.map(({ contact: c, owner: addedBy, deletedBy: by }) => (
+                      <li key={c.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                        <div>
+                          <span className="text-slate-700">{c.name}</span>
+                          {c.designation && <span className="text-slate-500"> · {c.designation}</span>}
+                          <div className="text-xs text-slate-500">
+                            {[c.email, c.phone].filter(Boolean).join(" · ")}
+                            {(c.email || c.phone) && " — "}
+                            {c.shared ? "Everyone" : "Private or selected people"}, added by {addedBy ?? "—"}; deleted by {by ?? "—"} on {fmtDateTime(c.deletedAt!)}
+                          </div>
+                        </div>
+                        <form action={restoreContact.bind(null, id, c.id)}>
+                          <button className="btn-secondary py-1 text-xs">Restore</button>
+                        </form>
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
               <ActionForm action={addContact.bind(null, id)} className="card p-4">
                 <h3 className="mb-3 font-semibold text-navy">Add contact</h3>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -266,16 +335,19 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                     <input name="phone" className="input" maxLength={30} />
                   </Field>
                 </div>
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex flex-wrap gap-4">
+                <div className="mt-4 grid gap-4 md:grid-cols-2">
+                  <div>
+                    <span className="label">Who can see it</span>
+                    <SharingFields visibility="private" people={viewers.filter((v) => v.id !== me.id)} />
+                  </div>
+                  <div className="flex flex-col justify-between gap-3">
                     <label className="flex items-center gap-2 text-sm">
                       <input type="checkbox" name="isPrimary" className="accent-brand" /> Primary contact
                     </label>
-                    <label className="flex items-center gap-2 text-sm" title="Private contacts are seen only by you and the client's account owner.">
-                      <input type="checkbox" name="shared" className="accent-brand" /> Share with everyone who can see this client
-                    </label>
+                    <div className="flex justify-end">
+                      <SubmitButton>Add contact</SubmitButton>
+                    </div>
                   </div>
-                  <SubmitButton>Add contact</SubmitButton>
                 </div>
               </ActionForm>
             </div>

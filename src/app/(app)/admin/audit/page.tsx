@@ -3,8 +3,10 @@ import Link from "next/link";
 import { Empty, fmtDateTime, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { requireSuperAdmin } from "@/lib/auth";
+import { auditNames, RECORD_HREF } from "@/lib/audit-names";
 
 const PAGE = 50;
+const ENTITY_LABEL: Record<string, string> = { user: "User", group: "Group", client: "Client", branch: "Branch", businessUnit: "Business unit", meeting: "Meeting", task: "Task" };
 
 export default async function AuditPage({ searchParams }: { searchParams: { entity?: string; action?: string; page?: string } }) {
   await requireSuperAdmin();
@@ -30,6 +32,7 @@ export default async function AuditPage({ searchParams }: { searchParams: { enti
     .limit(PAGE + 1)
     .offset((page - 1) * PAGE);
   const hasMore = rows.length > PAGE;
+  const names = await auditNames(rows.slice(0, PAGE));
   const qs = (p: number) => `?${new URLSearchParams({ ...searchParams, page: String(p) } as Record<string, string>)}`;
 
   return (
@@ -40,7 +43,7 @@ export default async function AuditPage({ searchParams }: { searchParams: { enti
           <option value="">All entities</option>
           {["user", "group", "client", "branch", "businessUnit"].map((e) => (
             <option key={e} value={e}>
-              {e}
+              {ENTITY_LABEL[e]}
             </option>
           ))}
         </select>
@@ -63,19 +66,37 @@ export default async function AuditPage({ searchParams }: { searchParams: { enti
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {rows.slice(0, PAGE).map((r) => (
-                <tr key={r.id}>
-                  <td className="whitespace-nowrap">{fmtDateTime(r.at)}</td>
-                  <td>{r.user ?? "—"}</td>
-                  <td className="font-mono text-xs">{r.action}</td>
-                  <td className="whitespace-nowrap">
-                    {r.entity}
-                    {r.entityId ? ` #${r.entityId}` : ""}
-                  </td>
-                  <td className="max-w-md break-words font-mono text-xs text-slate-500">{r.details ? JSON.stringify(r.details) : ""}</td>
-                  <td className="text-xs text-slate-500">{r.ip ?? ""}</td>
-                </tr>
-              ))}
+              {rows.slice(0, PAGE).map((r) => {
+                const d = (r.details ?? {}) as { name?: string; title?: string; username?: string };
+                const live = r.entityId ? names.name(r.entity, r.entityId) : null;
+                const recordName = live ?? d.name ?? d.title ?? d.username ?? null; // deleted records: the name saved with the entry
+                const href = live && r.entityId ? RECORD_HREF[r.entity]?.(r.entityId) : undefined;
+                return (
+                  <tr key={r.id}>
+                    <td className="whitespace-nowrap">{fmtDateTime(r.at)}</td>
+                    <td>{r.user ?? "—"}</td>
+                    <td className="font-mono text-xs">{r.action}</td>
+                    <td className="min-w-[10rem]">
+                      <div className="text-xs text-slate-500">{ENTITY_LABEL[r.entity] ?? r.entity}</div>
+                      {href ? (
+                        <Link href={href} className="link">
+                          {recordName}
+                        </Link>
+                      ) : (
+                        <span>{recordName ?? (r.entityId ? `#${r.entityId} (deleted)` : "—")}</span>
+                      )}
+                    </td>
+                    <td className="max-w-md text-xs text-slate-600">
+                      {names.details(r).map(([k, v]) => (
+                        <div key={k} className="break-words">
+                          <span className="text-slate-400">{k}:</span> {v}
+                        </div>
+                      ))}
+                    </td>
+                    <td className="text-xs text-slate-500">{r.ip ?? ""}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

@@ -1,6 +1,6 @@
 // Business-unit access rules. Super Admins see everything; everyone else sees clients (and through them
 // meetings) of the business units they're assigned to, plus clients they own or created.
-import { and, eq, exists, inArray, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, exists, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
@@ -93,11 +93,39 @@ export async function canApproveClient(me: SessionUser, client: { id: number; cr
  */
 export function contactVisibleTo(me: SessionUser): SQL {
   const cc = schema.clientContacts;
-  return or(
-    eq(cc.shared, true),
-    eq(cc.ownerId, me.id),
-    exists(db.select(one).from(schema.clients).where(and(eq(schema.clients.id, cc.clientId), eq(schema.clients.accountOwnerId, me.id)))),
+  if (isSuperAdmin(me)) return isNull(cc.deletedAt);
+  return and(
+    isNull(cc.deletedAt),
+    or(
+      eq(cc.shared, true),
+      eq(cc.ownerId, me.id),
+      exists(db.select(one).from(schema.clients).where(and(eq(schema.clients.id, cc.clientId), eq(schema.clients.accountOwnerId, me.id)))),
+      exists(db.select(one).from(schema.contactShares).where(and(eq(schema.contactShares.contactId, cc.id), eq(schema.contactShares.userId, me.id)))),
+    ),
   )!;
+}
+
+/**
+ * Active people who can see the client (the clientVisibleTo rule seen from the client's side): Super Admins,
+ * its business units' people, its account owner and creator, and their managers at any level. Contacts can be
+ * shared only with them, since nobody else could open the client.
+ */
+export async function usersWhoCanSeeClient(clientId: number) {
+  const res = await db.execute<{ id: number; full_name: string }>(sql`
+    with recursive c as (select account_owner_id, created_by_id from clients where id = ${clientId}),
+    up(id) as (
+      select um.manager_id from user_managers um, c where um.user_id in (c.account_owner_id, c.created_by_id)
+      union
+      select um.manager_id from user_managers um join up on um.user_id = up.id
+    )
+    select u.id, u.full_name from users u, c
+    where u.status = 'ACTIVE' and (
+      u.role = 'SUPER_ADMIN' or u.id = c.account_owner_id or u.id = c.created_by_id or u.id in (select id from up)
+      or exists (select 1 from user_business_units ub join client_business_units cb on cb.business_unit_id = ub.business_unit_id
+                 where ub.user_id = u.id and cb.client_id = ${clientId})
+    )
+    order by u.full_name`);
+  return res.rows.map((r) => ({ id: Number(r.id), fullName: r.full_name }));
 }
 
 /**
@@ -105,7 +133,7 @@ export function contactVisibleTo(me: SessionUser): SQL {
  * contact can also be managed by whoever can edit the client.
  */
 export async function canManageContact(me: SessionUser, contact: { ownerId: number | null; shared: boolean }, client: { id: number; accountOwnerId: number | null }) {
-  if (contact.ownerId === me.id || client.accountOwnerId === me.id) return true;
+  if (isSuperAdmin(me) || contact.ownerId === me.id || client.accountOwnerId === me.id) return true;
   return contact.shared && canManageClient(me, client);
 }
 

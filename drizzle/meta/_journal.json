@@ -78,6 +78,20 @@
       "when": 1793166328315,
       "tag": "0010_multiple_managers",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1793254270701,
+      "tag": "0011_contact_soft_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793254971649,
+      "tag": "0012_contact_shares",
+      "breakpoints": true
     }
   ]
 }

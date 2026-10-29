@@ -1,6 +1,6 @@
 "use server";
 import ExcelJS from "exceljs";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
@@ -115,6 +115,7 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
     ? await db
         .select({ clientId: schema.clientContacts.clientId, name: schema.clientContacts.name, email: schema.clientContacts.email, isPrimary: schema.clientContacts.isPrimary })
         .from(schema.clientContacts)
+        .where(isNull(schema.clientContacts.deletedAt))
     : [];
 
   const skipped: Issue[] = [];

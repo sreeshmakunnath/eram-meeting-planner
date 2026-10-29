@@ -10,7 +10,8 @@ export type NotificationKind =
   | "TASK_ASSIGNED"
   | "TASK_COMPLETED"
   | "MENTION"
-  | "GROUP_ADDED";
+  | "GROUP_ADDED"
+  | "CONTACT_SHARED";
 
 /**
  * Saves an in-app notification for each user (the person who caused it is left out).

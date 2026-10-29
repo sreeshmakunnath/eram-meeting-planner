@@ -185,13 +185,30 @@ export const clientContacts = pgTable(
     email: varchar("email", { length: 150 }),
     phone: varchar("phone", { length: 30 }),
     isPrimary: boolean("is_primary").default(false).notNull(),
-    /** Who added the contact. Private contacts are seen only by the owner, the client's account owner and Admins. */
+    /** Who added the contact. Private contacts are seen only by the owner, the client's account owner and Super Admins. */
     ownerId: integer("owner_id").references(() => users.id, { onDelete: "set null" }),
     /** Shared: everyone who can see the client sees the contact. */
     shared: boolean("shared").default(false).notNull(),
+    /** Deleting only flags the contact; Super Admins can still see and restore it. */
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    deletedById: integer("deleted_by_id").references(() => users.id, { onDelete: "set null" }),
     createdAt: createdAt(),
   },
   (t) => [index("client_contacts_client_idx").on(t.clientId)],
+);
+
+/** People a contact is shared with individually ("Selected people"); `shared` = everyone who can see the client. */
+export const contactShares = pgTable(
+  "contact_shares",
+  {
+    contactId: integer("contact_id")
+      .notNull()
+      .references(() => clientContacts.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+  },
+  (t) => [primaryKey({ columns: [t.contactId, t.userId] }), index("contact_shares_user_idx").on(t.userId)],
 );
 
 export const authTokens = pgTable("auth_tokens", {
@@ -267,9 +284,15 @@ export const clientBusinessUnitsRelations = relations(clientBusinessUnits, ({ on
   businessUnit: one(businessUnits, { fields: [clientBusinessUnits.businessUnitId], references: [businessUnits.id] }),
 }));
 
-export const clientContactsRelations = relations(clientContacts, ({ one }) => ({
+export const clientContactsRelations = relations(clientContacts, ({ one, many }) => ({
   client: one(clients, { fields: [clientContacts.clientId], references: [clients.id] }),
   owner: one(users, { fields: [clientContacts.ownerId], references: [users.id] }),
+  shares: many(contactShares),
+}));
+
+export const contactSharesRelations = relations(contactShares, ({ one }) => ({
+  contact: one(clientContacts, { fields: [contactShares.contactId], references: [clientContacts.id] }),
+  user: one(users, { fields: [contactShares.userId], references: [users.id] }),
 }));
 
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
