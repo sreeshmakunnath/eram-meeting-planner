@@ -4,6 +4,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
+  date,
   index,
   integer,
   jsonb,
@@ -690,3 +691,56 @@ export const notifications = pgTable(
   },
   (t) => [index("notifications_user_idx").on(t.userId, t.createdAt), index("notifications_unread_idx").on(t.userId, t.readAt)],
 );
+
+// =====================================================================
+// Daily log — what people did, in their own words (calls, visits, research…)
+// =====================================================================
+export const activityTypeEnum = pgEnum("activity_type", [
+  "CLIENT_CALL",
+  "EMAIL_FOLLOW_UP",
+  "SITE_VISIT",
+  "RESEARCH",
+  "PROPOSAL",
+  "INTERNAL_MEETING",
+  "ADMIN",
+  "OTHER",
+]);
+
+/** One entry in a person's daily log. Owner-only edits for 7 days after it was written; then it's locked. */
+export const dailyLogs = pgTable(
+  "daily_logs",
+  {
+    id: serial("id").primaryKey(),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id),
+    logDate: date("log_date", { mode: "string" }).notNull(),
+    type: activityTypeEnum("type").notNull(),
+    description: text("description").notNull(),
+    /** Time spent, optional. */
+    minutes: integer("minutes"),
+    clientId: integer("client_id").references(() => clients.id, { onDelete: "set null" }),
+    taskId: integer("task_id").references(() => tasks.id, { onDelete: "set null" }),
+    meetingId: integer("meeting_id").references(() => meetings.id, { onDelete: "set null" }),
+    /** Drives BU Admin visibility: the client's / meeting's unit, else the person's primary unit. */
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("daily_logs_user_date_idx").on(t.userId, t.logDate),
+    index("daily_logs_client_idx").on(t.clientId),
+    index("daily_logs_task_idx").on(t.taskId),
+    index("daily_logs_bu_idx").on(t.businessUnitId),
+  ],
+);
+
+export const dailyLogsRelations = relations(dailyLogs, ({ one }) => ({
+  user: one(users, { fields: [dailyLogs.userId], references: [users.id] }),
+  client: one(clients, { fields: [dailyLogs.clientId], references: [clients.id] }),
+  task: one(tasks, { fields: [dailyLogs.taskId], references: [tasks.id] }),
+  meeting: one(meetings, { fields: [dailyLogs.meetingId], references: [meetings.id] }),
+  businessUnit: one(businessUnits, { fields: [dailyLogs.businessUnitId], references: [businessUnits.id] }),
+}));

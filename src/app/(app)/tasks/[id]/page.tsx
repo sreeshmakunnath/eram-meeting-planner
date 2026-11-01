@@ -10,6 +10,8 @@ import { addComment, addSubtask, addWatcher, deleteTask, removeWatcher, setTaskS
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeUsers } from "@/lib/queries";
+import { logsFor } from "@/lib/daily-log";
+import { LogList } from "../../log/log-list";
 import { assigneeIdsIn, changedText, people as activityPeople } from "@/lib/activity-labels";
 import { canCommentOnTask, canEditTask, canViewTask, canWorkOnTask, CATEGORY_LABEL, completionDelta, OPEN_STATUSES, TASK_STATUS_LABEL, TASK_STATUS_TONE, type TaskStatus } from "@/lib/tasks";
 
@@ -46,9 +48,10 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
   const editable = await canEditTask(me, task);
   const canWork = await canWorkOnTask(me, task);
   const canComment = canWork || (await canCommentOnTask(me, task)); // managers of the people on it can comment
-  const [subtasks, people] = await Promise.all([
+  const [subtasks, people, taskLogs] = await Promise.all([
     Promise.all(task.subtasks.map(async (s) => ({ ...s, canWork: await canWorkOnTask(me, s) }))),
     activeUsers(), // subtask and watcher pickers
+    logsFor(me, { taskId: id }),
   ]);
   const watchers = [...task.watchers].sort((a, b) => a.user.fullName.localeCompare(b.user.fullName));
   const watching = watchers.some((w) => w.userId === me.id);
@@ -247,6 +250,18 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
               </ActionForm>
             )}
           </section>
+
+          {taskLogs.length > 0 && (
+            <section className="card">
+              <h2 className="flex justify-between border-b border-slate-200 px-5 py-3 font-semibold text-navy">
+                Logged work
+                <Link href="/log" className="link text-sm font-normal">
+                  Daily log →
+                </Link>
+              </h2>
+              <LogList rows={taskLogs} empty="" />
+            </section>
+          )}
 
           <section className="card">
             <h2 className="border-b border-slate-200 px-5 py-3 font-semibold text-navy">Activity</h2>

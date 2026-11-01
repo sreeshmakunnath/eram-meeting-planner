@@ -34,6 +34,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
     { href: "/meetings", label: "Meetings" },
     { href: "/meetings/calendar", label: "Calendar" },
     { href: "/tasks", label: "Tasks" },
+    { href: "/log", label: "Daily log" },
     { href: "/clients", label: "Clients" },
     { href: "/groups", label: "Groups" },
   ];

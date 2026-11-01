@@ -2,6 +2,14 @@
 
 Meeting and task planner for ERAM Holdings.
 
+## Daily log and task watchers
+
+| Feature | What works |
+| --- | --- |
+| Daily log | **Daily log** page (and a one-line box on the dashboard and on each client's **Daily log** tab): date, activity type (Client call, Email / follow-up, Site visit, Research, Proposal / tender work, Internal meeting, Admin, Other), what was done, optional time spent, optional client / task / meeting. Back-dating up to 7 days; the writer can edit or delete an entry for 7 days, then it locks. Filters by person, client, type and date range, a summary by type and person, **Excel export**. Entries linked to a task show under **Logged work** on the task |
+| Who sees a log | The writer, their managers (any level), Admins of the entry's business unit (the client's / meeting's / task's unit, else the writer's primary unit) and Super Admins. Peers don't |
+| Task watchers | **Watch** on any task you can see, or the creator / assignees / Admins add colleagues. Watchers see the task and its subtasks and comment, without it counting as their work; in-app notices on status, due date and comments, email on completion. **Show: Watching** in the task list |
+
 ## Phase 3 — Task planner and BD reports
 
 | Feature | What works |
@@ -142,6 +150,7 @@ src/
   lib/tasks.ts           task labels, visibility rules, assignment emails
   lib/task-queries.ts    task list / calendar queries
   lib/brief-tasks.ts     brief agreed actions → tasks sync (+ backfill)
+  lib/daily-log.ts       daily log visibility rules and queries
   lib/target-schedule.ts BD Target Schedule report
   lib/excel.ts           branded Excel export
   lib/auth.ts            next-auth config, lockout, requireUser / requireAdmin

@@ -14,6 +14,10 @@ import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtPlainDate, fmtTime, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
 import { isSimilar } from "@/lib/similar";
+import { logsFor } from "@/lib/daily-log";
+import { LogForm } from "../../log/log-form";
+import { LogList } from "../../log/log-list";
+import { logFormOptions } from "../../log/options";
 import { SharingFields } from "./sharing-fields";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -106,6 +110,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
       : [];
   const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
   const clientTasks = tab === "tasks" ? await listTasks(me, { scope: "all", bucket: "any", client: String(id) }) : [];
+  const [clientLogs, logOptions] = tab === "log" ? await Promise.all([logsFor(me, { clientId: id }), logFormOptions(me)]) : [[], null];
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
   const activity =
     tab === "activity"
@@ -219,6 +224,7 @@ export default async function ClientPage({ params, searchParams }: { params: { i
               { href: `${base}?tab=contacts`, label: `Contacts (${contacts.length})` },
               { href: `${base}?tab=meetings`, label: "Meetings" },
               { href: `${base}?tab=tasks`, label: "Tasks" },
+              { href: `${base}?tab=log`, label: "Daily log" },
               { href: `${base}?tab=activity`, label: "Activity" },
             ]}
           />
@@ -417,6 +423,18 @@ export default async function ClientPage({ params, searchParams }: { params: { i
                 empty="No tasks for this client yet."
                 newHref={`/tasks/new?client=${id}`}
               />
+            </div>
+          )}
+
+          {tab === "log" && (
+            <div className="card">
+              {logOptions && (
+                <div className="border-b border-slate-100 p-4">
+                  <LogForm options={logOptions} compact defaults={{ clientId: id }} />
+                </div>
+              )}
+              <LogList rows={clientLogs} empty="No logged activity for this client yet (or none you can see)." />
+              <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">Entries show to the person who wrote them, their managers and Admins.</p>
             </div>
           )}
 
