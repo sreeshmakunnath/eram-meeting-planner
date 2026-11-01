@@ -18,7 +18,8 @@ const BAR: Record<string, string> = {
   COMPLETED: "bg-emerald-500",
 };
 
-export default async function TimelinePage({ searchParams }: { searchParams: TaskFilters & { start?: string } }) {
+export default async function TimelinePage(props: { searchParams: Promise<TaskFilters & { start?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const today = todayRiyadh();
   const thisSunday = addDays(today, -new Date(`${today}T00:00:00Z`).getUTCDay());

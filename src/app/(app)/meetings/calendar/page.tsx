@@ -29,7 +29,8 @@ const shiftMonth = (ym: string, n: number) => {
   return d.toISOString().slice(0, 7);
 };
 
-export default async function CalendarPage({ searchParams }: { searchParams: Search }) {
+export default async function CalendarPage(props: { searchParams: Promise<Search> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const today = todayRiyadh();
   const view = searchParams.view === "agenda" || searchParams.view === "day" ? searchParams.view : "month";

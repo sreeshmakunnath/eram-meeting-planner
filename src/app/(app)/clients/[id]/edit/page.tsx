@@ -6,7 +6,8 @@ import { canManageClient, canSeeClient } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
 import { ClientForm } from "../../client-form";
 
-export default async function EditClientPage({ params }: { params: { id: string } }) {
+export default async function EditClientPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const me = await requireUser();
   const id = Number(params.id);
   const [client] = Number.isInteger(id) ? await db.select().from(schema.clients).where(eq(schema.clients.id, id)) : [];

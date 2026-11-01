@@ -10,7 +10,9 @@ import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtTime, STATUS_CHIP, STATUS_LABEL } from "@/lib/meetings";
 
-export default async function GroupPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
+export default async function GroupPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   const group = Number.isInteger(id)

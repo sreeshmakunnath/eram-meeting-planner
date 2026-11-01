@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { useRef } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState, useRef } from "react";
+import { useFormStatus } from "react-dom";
 import type { ClientImportResult } from "@/lib/actions/client-import";
 
 function Buttons({ setIntent }: { setIntent: (v: "check" | "import") => void }) {
@@ -42,7 +42,7 @@ function IssueTable({ title, tone, rows }: { title: string; tone: "red" | "amber
 }
 
 export function ClientImportForm({ action }: { action: (s: ClientImportResult | undefined, fd: FormData) => Promise<ClientImportResult> }) {
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   const intent = useRef<HTMLInputElement>(null);
   const n = (list?: unknown[]) => list?.length ?? 0;
 

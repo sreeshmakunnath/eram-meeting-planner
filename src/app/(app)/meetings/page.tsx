@@ -9,7 +9,8 @@ import { activeGroups, activeUsers, clientOptions } from "@/lib/queries";
 
 const priorityTone = { HIGH: "red", MEDIUM: "amber", LOW: "gray" } as const;
 
-export default async function MeetingsPage({ searchParams }: { searchParams: MeetingFilters & { msg?: string } }) {
+export default async function MeetingsPage(props: { searchParams: Promise<MeetingFilters & { msg?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const [rows, clients, users, groups, units] = await Promise.all([
     listMeetings(me, searchParams),

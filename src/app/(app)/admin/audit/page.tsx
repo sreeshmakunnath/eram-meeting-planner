@@ -8,7 +8,8 @@ import { auditNames, RECORD_HREF } from "@/lib/audit-names";
 const PAGE = 50;
 const ENTITY_LABEL: Record<string, string> = { user: "User", group: "Group", client: "Client", branch: "Branch", businessUnit: "Business unit", meeting: "Meeting", task: "Task" };
 
-export default async function AuditPage({ searchParams }: { searchParams: { entity?: string; action?: string; page?: string } }) {
+export default async function AuditPage(props: { searchParams: Promise<{ entity?: string; action?: string; page?: string }> }) {
+  const searchParams = await props.searchParams;
   await requireSuperAdmin();
   const page = Math.max(1, Number(searchParams.page) || 1);
   const where: SQL[] = [];

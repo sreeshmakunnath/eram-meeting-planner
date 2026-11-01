@@ -6,7 +6,8 @@ import { TaskFilterBar } from "../task-filters";
 import { NewTaskButton, TaskTabs } from "../task-nav";
 import { Board } from "./board";
 
-export default async function BoardPage({ searchParams }: { searchParams: TaskFilters }) {
+export default async function BoardPage(props: { searchParams: Promise<TaskFilters> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const rows = (await listTasks(me, { ...searchParams, bucket: "any" })).filter(
     (r) => r.status !== "CANCELLED" && (r.status !== "COMPLETED" || (r.completedAt && Date.now() - r.completedAt.getTime() < 14 * 86400_000)),

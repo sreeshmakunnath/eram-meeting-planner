@@ -18,7 +18,8 @@ const BUCKETS: [string, string][] = [
   ["any", "Everything"],
 ];
 
-export default async function TasksPage({ searchParams }: { searchParams: TaskFilters & { msg?: string; n?: string } }) {
+export default async function TasksPage(props: { searchParams: Promise<TaskFilters & { msg?: string; n?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const bucket = searchParams.bucket ?? "open";
   const rows = await listTasks(me, searchParams);

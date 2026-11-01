@@ -4,7 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { meetingFormOptions } from "../form-options";
 import { MeetingForm } from "../meeting-form";
 
-export default async function NewMeetingPage({ searchParams }: { searchParams: { date?: string; client?: string } }) {
+export default async function NewMeetingPage(props: { searchParams: Promise<{ date?: string; client?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const date = /^\d{4}-\d{2}-\d{2}$/.test(searchParams.date ?? "") ? searchParams.date : "";
   const clientId = Number(searchParams.client) || null;

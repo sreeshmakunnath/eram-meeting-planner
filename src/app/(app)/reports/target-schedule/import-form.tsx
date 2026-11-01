@@ -1,5 +1,6 @@
 "use client";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 import type { TargetImportResult } from "@/lib/actions/target";
 
 function Submit() {
@@ -12,7 +13,7 @@ function Submit() {
 }
 
 export function TargetImportForm({ action }: { action: (s: TargetImportResult | undefined, fd: FormData) => Promise<TargetImportResult> }) {
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   return (
     <details className="card mb-4 p-4" open={!!state}>
       <summary className="cursor-pointer text-sm font-semibold text-navy">Import a BD Target Schedule sheet (.xlsx)</summary>

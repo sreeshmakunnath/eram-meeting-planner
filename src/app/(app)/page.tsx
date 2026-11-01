@@ -31,7 +31,8 @@ function Tile({ label, value, href }: { label: string; value: number | string; h
 const count = sql<number>`count(*)`.mapWith(Number);
 const m = schema.meetings;
 
-export default async function Dashboard({ searchParams }: { searchParams: { denied?: string; tab?: string; bu?: string } }) {
+export default async function Dashboard(props: { searchParams: Promise<{ denied?: string; tab?: string; bu?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const admin = isAdmin(me);
   const tab = admin && searchParams.tab === "org" ? "org" : "mine";

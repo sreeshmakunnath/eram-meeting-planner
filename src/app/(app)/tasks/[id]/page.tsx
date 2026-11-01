@@ -21,7 +21,9 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   subdeleted: { tone: "ok", text: "Subtask deleted." },
 };
 
-export default async function TaskPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
+export default async function TaskPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) notFound();

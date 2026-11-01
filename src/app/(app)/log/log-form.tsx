@@ -1,6 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { useFormState } from "react-dom";
+import { useActionState, useEffect, useState } from "react";
 import { SubmitButton, type ActionState } from "@/components/action-form";
 import { saveLog } from "@/lib/actions/daily-log";
 import { ACTIVITY_LABEL, ACTIVITY_TYPES, DURATIONS } from "@/lib/daily-log-labels";
@@ -14,10 +13,10 @@ type Entry = { id: number; logDate: string; type: string; description: string; m
  * After adding, the form clears so the next entry can be typed straight away.
  */
 export function LogForm({ options, entry, compact = false, defaults = {} }: { options: LogFormOptions; entry?: Entry; compact?: boolean; defaults?: { clientId?: number; taskId?: number } }) {
-  const [state, action] = useFormState<ActionState, FormData>(saveLog, undefined);
-  const ref = useRef<HTMLFormElement>(null);
+  const [state, action] = useActionState<ActionState, FormData>(saveLog, undefined);
+  const [round, setRound] = useState(0); // bumped after each add: a fresh form clears the fields
   useEffect(() => {
-    if (state?.ok && !entry) ref.current?.reset();
+    if (state?.ok && !entry) setRound((r) => r + 1);
   }, [state, entry]);
   const select = (name: string, label: string, list: Option[], value: number | null | undefined) => (
     <select name={name} className="input" defaultValue={value ?? ""} aria-label={label}>
@@ -58,7 +57,7 @@ export function LogForm({ options, entry, compact = false, defaults = {} }: { op
 
   if (compact)
     return (
-      <form ref={ref} action={action} className="space-y-2">
+      <form key={round} action={action} className="space-y-2">
         <div className="grid gap-2 sm:grid-cols-[11rem_1fr_12rem_9rem_auto]">
           {type}
           <input name="description" className="input" placeholder="What did you do? e.g. Called SABIC procurement about the RFQ" maxLength={2000} required />
@@ -71,7 +70,7 @@ export function LogForm({ options, entry, compact = false, defaults = {} }: { op
     );
 
   return (
-    <form ref={ref} action={action} className="space-y-3">
+    <form key={round} action={action} className="space-y-3">
       {entry && <input type="hidden" name="id" value={entry.id} />}
       <div className="grid gap-3 sm:grid-cols-[10rem_12rem_1fr_10rem]">
         <input type="date" name="logDate" className="input" defaultValue={entry?.logDate ?? options.today} min={entry ? undefined : options.minDate} max={options.today} required aria-label="Date" />

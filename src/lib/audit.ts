@@ -11,7 +11,7 @@ export async function audit(
 ) {
   let ip: string | null = null;
   try {
-    ip = headers().get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   } catch {
     // headers() is unavailable outside a request (e.g. during auth callbacks in some contexts)
   }

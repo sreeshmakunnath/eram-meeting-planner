@@ -4,7 +4,8 @@ import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 
 /** Opening a notification: mark it read, then go to what it's about. */
-export default async function OpenNotification({ params }: { params: { id: string } }) {
+export default async function OpenNotification(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) redirect("/notifications");

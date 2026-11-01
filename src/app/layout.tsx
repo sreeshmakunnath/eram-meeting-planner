@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { KeepFormValues } from "@/components/keep-form-values";
 import { RegisterServiceWorker } from "@/components/register-sw";
 import "./globals.css";
 
@@ -26,6 +27,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         {children}
         <RegisterServiceWorker />
+        <KeepFormValues />
       </body>
     </html>
   );

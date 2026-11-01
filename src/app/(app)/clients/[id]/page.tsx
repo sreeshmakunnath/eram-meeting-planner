@@ -40,7 +40,9 @@ function ApprovalNote({ details }: { details: unknown }) {
   );
 }
 
-export default async function ClientPage({ params, searchParams }: { params: { id: string }; searchParams: { tab?: string; msg?: string } }) {
+export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   const client = Number.isInteger(id)

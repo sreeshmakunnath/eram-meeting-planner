@@ -10,7 +10,8 @@ import { canView, fmtDay, fmtPlainDate, fmtTime, MODE_LABEL } from "@/lib/meetin
 export const dynamic = "force-dynamic";
 
 /** Printable Meeting Brief in the layout of the ERAM Holdings "Meeting Brief" sheet. */
-export default async function PrintBrief({ params }: { params: { id: string } }) {
+export default async function PrintBrief(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) notFound();

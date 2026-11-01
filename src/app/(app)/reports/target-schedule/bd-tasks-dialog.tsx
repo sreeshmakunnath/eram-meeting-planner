@@ -1,6 +1,5 @@
 "use client";
-import { useEffect, useRef } from "react";
-import { useFormState } from "react-dom";
+import { useActionState, useEffect, useRef } from "react";
 import { SubmitButton, type ActionState } from "@/components/action-form";
 
 export type BdTaskDefault = { category: string; label: string; title: string; due: string };
@@ -22,7 +21,7 @@ export function BdTasksDialog({
   partial: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   // Close once the tasks are created; the schedule refreshes with the new dates.
   useEffect(() => {
     if (state?.ok) ref.current?.close();

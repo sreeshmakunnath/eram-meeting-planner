@@ -1,5 +1,6 @@
 "use client";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState } from "react";
+import { useFormStatus } from "react-dom";
 
 export type ActionState = { error?: string; ok?: string } | undefined;
 type Action = (state: ActionState, formData: FormData) => Promise<ActionState>;
@@ -14,7 +15,7 @@ export function ActionForm({
   children: React.ReactNode;
   className?: string;
 }) {
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   return (
     <form action={formAction} className={className}>
       {state?.error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{state.error}</div>}

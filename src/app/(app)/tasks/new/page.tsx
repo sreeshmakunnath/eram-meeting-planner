@@ -4,7 +4,8 @@ import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { TaskForm } from "../task-form";
 
-export default async function NewTaskPage({ searchParams }: { searchParams: { meeting?: string; client?: string } }) {
+export default async function NewTaskPage(props: { searchParams: Promise<{ meeting?: string; client?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const meetingId = Number(searchParams.meeting) || null;
   const [m] = meetingId ? await db.select({ clientId: schema.meetings.clientId }).from(schema.meetings).where(eq(schema.meetings.id, meetingId)) : [];

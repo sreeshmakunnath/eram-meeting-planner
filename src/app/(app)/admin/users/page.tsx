@@ -9,7 +9,8 @@ import { activeBusinessUnits } from "@/lib/queries";
 
 type Search = { q?: string; bu?: string; role?: string; status?: string; msg?: string };
 
-export default async function UsersPage({ searchParams }: { searchParams: Search }) {
+export default async function UsersPage(props: { searchParams: Promise<Search> }) {
+  const searchParams = await props.searchParams;
   const me = await requireAdmin();
   const { users, businessUnits } = schema;
   // BU Admins see the people in their business units

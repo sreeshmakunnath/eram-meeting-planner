@@ -7,7 +7,8 @@ import { canEditLog, EDIT_DAYS } from "@/lib/daily-log";
 import { LogForm } from "../../log-form";
 import { logFormOptions } from "../../options";
 
-export default async function EditLogPage({ params }: { params: { id: string } }) {
+export default async function EditLogPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) notFound();

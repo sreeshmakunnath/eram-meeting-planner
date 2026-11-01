@@ -10,7 +10,9 @@ import { activeGroups } from "@/lib/queries";
 import { TASK_STATUS_LABEL, TASK_STATUS_TONE } from "@/lib/tasks";
 import { BriefForm } from "./brief-form";
 
-export default async function BriefPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
+export default async function BriefPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) notFound();

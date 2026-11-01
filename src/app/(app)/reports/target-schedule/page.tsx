@@ -52,7 +52,8 @@ function missingBdTasks(r: TargetRow): BdTaskDefault[] {
   }));
 }
 
-export default async function TargetSchedulePage({ searchParams }: { searchParams: { batch?: string } }) {
+export default async function TargetSchedulePage(props: { searchParams: Promise<{ batch?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const [rows, batchList, users, team] = await Promise.all([targetScheduleRows(me, searchParams.batch), batches(), activeUsers(), teamIds(me.id)]);
   const people = users.map(({ id, fullName }) => ({ id, fullName }));

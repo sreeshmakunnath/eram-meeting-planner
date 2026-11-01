@@ -47,7 +47,8 @@ function StepCell({ c, first, next }: { c: Cell; first: string; next: string }) 
  * Printable monthly BD progress report: for one business unit (BU Admins: their units; Super Admins: any), or for a
  * manager's team (the clients they and their reportees own).
  */
-export default async function BdReport({ searchParams }: { searchParams: { bu?: string; month?: string } }) {
+export default async function BdReport(props: { searchParams: Promise<{ bu?: string; month?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const [units, team] = await Promise.all([isAdmin(me) ? selectableBus(me) : Promise.resolve([]), teamIds(me.id)]);
   const isManager = team.length > 0;

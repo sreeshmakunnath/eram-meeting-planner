@@ -16,7 +16,8 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   locked: { tone: "error", text: `Entries can only be changed by the person who wrote them, up to ${EDIT_DAYS} days after writing.` },
 };
 
-export default async function DailyLogPage({ searchParams }: { searchParams: LogFilters & { msg?: string } }) {
+export default async function DailyLogPage(props: { searchParams: Promise<LogFilters & { msg?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const f = searchParams;
   const range = defaultRange();

@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 // Every page needs a signed-in user; /admin/* needs an Admin role (BU Admin or Super Admin).
 // Role checks are repeated on the server in each page and action (requireUser / requireAdmin).
 export default withAuth(
-  function middleware(req) {
+  function proxy(req) {
     if (req.nextUrl.pathname.startsWith("/admin") && !["ADMIN", "SUPER_ADMIN"].includes(req.nextauth.token?.role ?? "")) {
       return NextResponse.redirect(new URL("/?denied=1", req.url));
     }

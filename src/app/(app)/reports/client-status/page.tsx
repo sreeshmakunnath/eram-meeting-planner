@@ -12,7 +12,8 @@ import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 type Search = { flag?: string; stage?: string; owner?: string; q?: string; bu?: string };
 const FLAG_ORDER: Flag[] = ["OVERDUE", "TO_SCHEDULE", "BOOKED", "NO_NEXT_STEP", "NO_MEETING"];
 
-export default async function ClientStatusPage({ searchParams }: { searchParams: Search }) {
+export default async function ClientStatusPage(props: { searchParams: Promise<Search> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const all = await clientStatusRows(scopeToBu(me, Number(searchParams.bu)) ?? me); // ?bu= from the BU overview
   const owners = [...new Map(all.filter((r) => r.ownerId).map((r) => [r.ownerId!, r.owner!])).entries()];

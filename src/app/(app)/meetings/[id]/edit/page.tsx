@@ -8,7 +8,9 @@ import { canEditMeeting, riyadhParts } from "@/lib/meetings";
 import { meetingFormOptions, meetingSelections } from "../../form-options";
 import { MeetingForm } from "../../meeting-form";
 
-export default async function EditMeetingPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
+export default async function EditMeetingPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   const [m] = Number.isInteger(id) ? await db.select().from(schema.meetings).where(eq(schema.meetings.id, id)) : [];

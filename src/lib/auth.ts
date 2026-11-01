@@ -77,7 +77,7 @@ export const authOptions: NextAuthOptions = {
         return token;
       }
       // On later requests, re-read role and status so admin changes apply without re-login.
-      // Runs server-side only (middleware decodes the token without calling this).
+      // Runs server-side only (the proxy decodes the token without calling this).
       if (token.uid) {
         try {
           const [u] = await db

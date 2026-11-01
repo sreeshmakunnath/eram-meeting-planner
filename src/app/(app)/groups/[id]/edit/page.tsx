@@ -5,7 +5,8 @@ import { db, schema } from "@/db";
 import { requireAdmin } from "@/lib/auth";
 import { GroupForm } from "../../group-form";
 
-export default async function EditGroupPage({ params }: { params: { id: string } }) {
+export default async function EditGroupPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   await requireAdmin();
   const id = Number(params.id);
   const [group] = Number.isInteger(id) ? await db.select().from(schema.groups).where(eq(schema.groups.id, id)) : [];

@@ -5,7 +5,8 @@ import { findValidToken } from "@/lib/tokens";
 
 export const dynamic = "force-dynamic";
 
-export default async function SetPasswordPage({ searchParams }: { searchParams: { token?: string } }) {
+export default async function SetPasswordPage(props: { searchParams: Promise<{ token?: string }> }) {
+  const searchParams = await props.searchParams;
   const token = searchParams.token ?? "";
   const valid = token ? await findValidToken(token) : null;
   if (!valid) {

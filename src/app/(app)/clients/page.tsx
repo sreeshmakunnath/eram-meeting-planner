@@ -9,7 +9,8 @@ import { activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES } from "@/lib/que
 
 type Search = { q?: string; type?: string; stage?: string; owner?: string; status?: string; country?: string; bu?: string };
 
-export default async function ClientsPage({ searchParams }: { searchParams: Search }) {
+export default async function ClientsPage(props: { searchParams: Promise<Search> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const { clients, users } = schema;
   const visible = clientVisibleTo(me);

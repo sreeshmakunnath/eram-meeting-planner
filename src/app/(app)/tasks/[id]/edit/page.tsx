@@ -6,7 +6,8 @@ import { requireUser } from "@/lib/auth";
 import { canEditTask } from "@/lib/tasks";
 import { TaskForm } from "../../task-form";
 
-export default async function EditTaskPage({ params }: { params: { id: string } }) {
+export default async function EditTaskPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const me = await requireUser();
   const id = Number(params.id);
   const [task] = Number.isInteger(id) ? await db.select().from(schema.tasks).where(eq(schema.tasks.id, id)) : [];

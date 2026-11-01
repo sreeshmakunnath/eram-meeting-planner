@@ -51,7 +51,7 @@ Who sees what: Admins see every meeting. Users see meetings they organise, atten
 | --- | --- |
 | Login | Email or username + password, 5 failed attempts lock the account for 15 min, inactive users can't sign in, 8-hour session |
 | Passwords | Welcome email with a set-password link (72 h), Forgot password (30 min link, single use), change password in profile, policy: 8+ chars, upper case, number, symbol |
-| Roles | **Admin** (everything) and **User** (own groups, clients, profile). Checked in middleware *and* in every page and server action |
+| Roles | **Admin** (everything) and **User** (own groups, clients, profile). Checked in the proxy (`src/proxy.ts`) *and* in every page and server action |
 | Users | Admin list with search and filters, add / edit, branch, business unit, reporting manager, groups, activate / deactivate, unlock, resend password link. Users are never hard-deleted |
 | Branches & BUs | Admin-managed master lists (add, rename, deactivate) |
 | Groups | Any number of groups; type, lead, members, archive, delete. Users see only the groups they belong to. New members get an email |
@@ -62,7 +62,7 @@ Who sees what: Admins see every meeting. Users see meetings they organise, atten
 
 ## Stack
 
-- **Next.js 14** (App Router, React 18, TypeScript): pages are React server components; forms post to **server actions** (`src/lib/actions/*`)
+- **Next.js 16** (App Router, React 19, TypeScript): pages are React server components; forms post to **server actions** (`src/lib/actions/*`)
 - **PostgreSQL** via **Drizzle ORM** (`src/db/schema.ts`): pure TypeScript, no binary engine, works well on Vercel + Neon
 - **next-auth 4** (credentials provider, JWT sessions). Microsoft sign-in can be added as a second provider later
 - **Tailwind CSS** with the ERAM navy `#1F3864` / blue `#2E75B6` palette
@@ -156,7 +156,7 @@ src/
   lib/auth.ts            next-auth config, lockout, requireUser / requireAdmin
   lib/mail.ts            email layout + sending
   lib/audit.ts           audit log writer
-  middleware.ts          sign-in required everywhere; /admin/* needs Admin
+  proxy.ts               sign-in required everywhere; /admin/* needs Admin
 drizzle/                 SQL migrations (generated)
 ```
 

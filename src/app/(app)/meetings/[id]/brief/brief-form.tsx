@@ -1,6 +1,6 @@
 "use client";
-import { useState } from "react";
-import { useFormState, useFormStatus } from "react-dom";
+import { useActionState, useState } from "react";
+import { useFormStatus } from "react-dom";
 import type { ActionState } from "@/components/action-form";
 
 type Owner = { value: string; label: string };
@@ -53,7 +53,7 @@ export function BriefForm({
   owners: Owner[];
   header: { k: string; v: string }[];
 }) {
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   const [rows, setRows] = useState<ActionRow[]>(
     (defaults.actions.length ? defaults.actions : [{ id: null, action: "", owner: "", deadline: "" }]).map((a, i) => ({ ...a, key: i })),
   );

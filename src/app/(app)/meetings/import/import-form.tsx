@@ -1,6 +1,7 @@
 "use client";
+import { useActionState } from "react";
 import Link from "next/link";
-import { useFormState, useFormStatus } from "react-dom";
+import { useFormStatus } from "react-dom";
 import type { ImportResult } from "@/lib/actions/import";
 
 function Submit() {
@@ -13,7 +14,7 @@ function Submit() {
 }
 
 export function ImportForm({ action }: { action: (s: ImportResult | undefined, fd: FormData) => Promise<ImportResult> }) {
-  const [state, formAction] = useFormState(action, undefined);
+  const [state, formAction] = useActionState(action, undefined);
   return (
     <div className="space-y-4">
       <form action={formAction} className="card flex flex-wrap items-center gap-3 p-5">

@@ -5,7 +5,8 @@ import { db, schema } from "@/db";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { GROUP_TYPES } from "@/lib/queries";
 
-export default async function GroupsPage({ searchParams }: { searchParams: { q?: string; type?: string; status?: string; msg?: string } }) {
+export default async function GroupsPage(props: { searchParams: Promise<{ q?: string; type?: string; status?: string; msg?: string }> }) {
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const { groups, users } = schema;
   const where: SQL[] = [];

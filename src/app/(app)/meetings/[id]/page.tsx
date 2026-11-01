@@ -52,7 +52,9 @@ function Row({ k, children }: { k: string; children: React.ReactNode }) {
   );
 }
 
-export default async function MeetingPage({ params, searchParams }: { params: { id: string }; searchParams: { tab?: string; msg?: string } }) {
+export default async function MeetingPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireUser();
   const id = Number(params.id);
   if (!Number.isInteger(id)) notFound();

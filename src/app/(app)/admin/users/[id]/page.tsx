@@ -18,7 +18,9 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   lastadmin: { tone: "error", text: "This is the last active Super Admin. Make someone else Super Admin first." },
 };
 
-export default async function EditUserPage({ params, searchParams }: { params: { id: string }; searchParams: { msg?: string } }) {
+export default async function EditUserPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
+  const params = await props.params;
+  const searchParams = await props.searchParams;
   const me = await requireAdmin();
   const id = Number(params.id);
   const [user] = Number.isInteger(id) ? await db.select().from(schema.users).where(eq(schema.users.id, id)) : [];
