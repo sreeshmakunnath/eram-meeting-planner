@@ -52,8 +52,6 @@ Who sees what: Admins see every meeting. Users see meetings they organise, atten
 | Audit log | Sign-ins, failed sign-ins, lockouts, password events and every change to users, groups, clients and masters |
 | Email | Instant emails only (welcome, reset, added to group; Phase 2 adds meeting invites and briefs). Scheduled reminders are a later phase |
 
-The 10 companies from the Client Meeting Planner / BD Target Schedule are seeded as the first clients.
-
 ## Stack
 
 - **Next.js 14** (App Router, React 18, TypeScript): pages are React server components; forms post to **server actions** (`src/lib/actions/*`)
@@ -76,12 +74,12 @@ docker run -d --name eram-pg -e POSTGRES_USER=eram -e POSTGRES_PASSWORD=eram -e 
 cp .env.example .env          # then set NEXTAUTH_SECRET (openssl rand -base64 32)
 npm install
 npm run db:migrate            # creates the tables
-npm run db:seed               # branches, business units, first admin, 10 clients
+npm run db:seed               # branches, business units, the two Super Admins (SUPER_ADMIN_1_* / SUPER_ADMIN_2_* in .env)
 # optional: sign in as admin → Meetings → Import Excel → upload ERAM_Meeting_Planner.xlsx
 npm run dev                   # http://localhost:3000
 ```
 
-Sign in with `admin` / `Admin@12345` (set by `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`) and change the password under **My profile**.
+Sign in with either Super Admin's email or username. If you left `SUPER_ADMIN_n_PASSWORD` empty, the seed printed a random password; change it under **My profile**. Re-running the seed never changes existing users.
 
 **Office network blocking the database?** If you see `connect ETIMEDOUT …:5432`, your network blocks PostgreSQL's port. Neon URLs (`…neon.tech`) automatically use Neon's serverless driver over **port 443**, which normally gets through. To force a driver, set `DB_DRIVER=neon` or `DB_DRIVER=pg` in `.env`. If the database can't be reached, pages show a clear "Can't reach the database" message instead of crashing, and your session is kept.
 
@@ -97,22 +95,13 @@ Sign in with `admin` / `Admin@12345` (set by `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PA
    - `NEXTAUTH_URL` and `APP_URL`: your Vercel URL, e.g. `https://eram-meeting-planner.vercel.app`
    - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `MAIL_FROM`: see below
 4. Deploy. The `vercel-build` script runs `db:migrate` before `next build`, so tables are created or updated on every deploy.
-5. Seed once from your machine against Neon: `DATABASE_URL="<neon url>" npm run db:seed`.
+5. Seed once from your machine against Neon: put the Neon URL and the `SUPER_ADMIN_1_*` / `SUPER_ADMIN_2_*` values in `.env`, then `npm run db:seed`. It creates the branches, business units and the two Super Admins, nothing else (clients come from **Clients** or **Meetings → Import Excel**).
 
 **SMTP options**
 - Microsoft 365: `smtp.office365.com`, port `587`, a licensed mailbox and password (IT must allow SMTP AUTH for it).
 - Resend: `smtp.resend.com`, port `465`, user `resend`, password = API key; verify your domain in Resend first.
 
 **Data location:** Vercel and Neon run in US / EU / Asia-Pacific regions. Check with IT whether ERAM data must stay in Saudi Arabia before going to production.
-
-## Demo data
-
-`npm run db:demo` adds a ready-made demo to the database in `.env` (one transaction, all or nothing):
-- Business units **Eram Africa** and **Source India** (reused if they exist, created if not)
-- Per unit a BU Admin and a User who reports to them: `amina@demo.eram.test` / `daniel@demo.eram.test` (Africa), `rahul@demo.eram.test` / `priya@demo.eram.test` (India). Password `Demo@12345`, or set `DEMO_PASSWORD`.
-- Per unit 3 prospect clients ("… (Demo)") with a contact and BD steps at different stages, 6 meetings around today (one held, upcoming ones, one to be scheduled, one internal) and general tasks (one overdue, one with a subtask)
-
-`npm run db:demo:remove` takes it all out again: the demo users and everything they organised or created (also during the demo), and the units the demo created unless real data uses them by then. It refuses to add twice.
 
 ## Backups
 
@@ -145,7 +134,7 @@ src/
   components/            UI helpers, sidebar, form wrapper
   db/schema.ts           all tables (Drizzle)
   db/pool.ts             picks the Neon (port 443) or pg (port 5432) driver
-  db/migrate.ts, seed.ts migrations (+ brief-task catch-up), first data
+  db/migrate.ts, seed.ts migrations (+ brief-task catch-up), masters + the two Super Admins
   lib/actions/           server actions: auth, users, groups, clients, masters, meetings, briefs, import, tasks, target
   lib/meetings.ts        meeting labels, Saudi-time helpers, visibility rules, .ics builder
   lib/meeting-queries.ts planner list / calendar queries
