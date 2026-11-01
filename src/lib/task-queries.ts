@@ -5,7 +5,7 @@ import { PRIORITIES, todayRiyadh } from "./meetings";
 import { assignedToMyTeam, OPEN_STATUSES, TASK_CATEGORIES, TASK_STATUSES, taskVisibleTo, type TaskStatus } from "./tasks";
 
 export type TaskFilters = {
-  scope?: string; // "mine" (assigned to me, default) | "created" | "team" (assigned to my reportees) | "all"
+  scope?: string; // "mine" (assigned to me, default) | "created" | "team" (assigned to my reportees) | "watching" | "all"
   bucket?: string; // today | week | overdue | upcoming | open (default) | completed | any
   status?: string;
   category?: string;
@@ -35,6 +35,8 @@ export function taskWhere(me: SessionUser, f: TaskFilters): SQL | undefined {
   if (scope === "mine") w.push(assignedTo(me.id));
   if (scope === "created") w.push(eq(t.createdById, me.id));
   if (scope === "team") w.push(assignedToMyTeam(me));
+  if (scope === "watching")
+    w.push(exists(db.select({ one: sql`1` }).from(schema.taskWatchers).where(and(eq(schema.taskWatchers.taskId, t.id), eq(schema.taskWatchers.userId, me.id)))));
   const open = inArray(t.status, OPEN_STATUSES);
   const due = sql`${t.dueDate}::date`;
   switch (f.bucket ?? "open") {

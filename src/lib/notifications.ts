@@ -9,6 +9,7 @@ export type NotificationKind =
   | "BRIEF_SUBMITTED"
   | "TASK_ASSIGNED"
   | "TASK_COMPLETED"
+  | "TASK_WATCHED"
   | "MENTION"
   | "GROUP_ADDED"
   | "CONTACT_SHARED";

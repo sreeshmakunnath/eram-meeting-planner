@@ -10,14 +10,16 @@ import { taskBuFor } from "@/lib/task-bu";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { notify } from "@/lib/notifications";
-import { PRIORITIES } from "@/lib/meetings";
+import { fmtPlainDate, PRIORITIES } from "@/lib/meetings";
 import {
   canCommentOnTask,
   canEditTask,
+  canViewTask,
   canWorkOnTask,
   expandAssignees,
   logTaskActivity,
   notifyTaskAssigned,
+  notifyWatchers,
   syncParentProgress,
   TASK_CATEGORIES,
   TASK_STATUS_LABEL,
@@ -57,6 +59,18 @@ async function applyStatus(me: SessionUser, taskId: number, status: TaskStatus, 
   if (task.status !== status) {
     await logTaskActivity(taskId, me.id, "STATUS_CHANGED", { from: task.status, to: status });
     if (status === "COMPLETED") await notifyCompleted(taskId, me);
+    await notifyWatchers(
+      taskId,
+      me,
+      status === "COMPLETED"
+        ? {
+            title: `Task completed: ${task.title}`,
+            body: `Completed by ${me.name}`,
+            email: `<p>${esc(me.name)} completed <b>${esc(task.title)}</b>, a task you watch.</p>`,
+            skip: task.createdById ? [task.createdById] : [], // the creator already got "Task completed"
+          }
+        : { title: `${TASK_STATUS_LABEL[status]}: ${task.title}`, body: `${me.name} moved it from ${TASK_STATUS_LABEL[task.status]} to ${TASK_STATUS_LABEL[status]}` },
+    );
   } else if (percent !== undefined && percent !== task.percent) await logTaskActivity(taskId, me.id, "PROGRESS", { from: task.percent, to: p });
   if (task.parentTaskId) {
     await syncParentProgress(task.parentTaskId);
@@ -127,6 +141,8 @@ export async function saveTask(_: ActionState, fd: FormData): Promise<ActionStat
       await db.update(schema.tasks).set(data).where(eq(schema.tasks.id, before.id));
       const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => String(before[k] ?? "") !== String(data[k] ?? ""));
       if (changed.length) await logTaskActivity(before.id, me.id, "UPDATED", { changed });
+      if (changed.includes("dueDate"))
+        await notifyWatchers(before.id, me, { title: `Due date changed: ${data.title}`, body: `${me.name} moved it from ${fmtPlainDate(before.dueDate)} to ${fmtPlainDate(data.dueDate)}` });
     } else {
       const [task] = await db.insert(schema.tasks).values({ ...data, createdById: me.id }).returning();
       id = task.id;
@@ -233,6 +249,7 @@ export async function addComment(id: number, _: ActionState, fd: FormData): Prom
     if (!task || !(await canCommentOnTask(me, task))) throw new FormError("You can't comment on this task.");
     const body = req(fd, "body", "Comment");
     await db.insert(schema.taskComments).values({ taskId: id, userId: me.id, body });
+    const mentionedIds: number[] = []; // they get the mention, not a second watcher notice
     const handles = [...body.matchAll(/@([\p{L}0-9._-]+)/gu)].map((m) => m[1].toLowerCase());
     if (handles.length) {
       const users = await db.select({ id: schema.users.id, username: schema.users.username, fullName: schema.users.fullName, email: schema.users.email }).from(schema.users).where(eq(schema.users.status, "ACTIVE"));
@@ -249,12 +266,65 @@ export async function addComment(id: number, _: ActionState, fd: FormData): Prom
           `<p>Hello ${esc(u.fullName)},</p><p>${esc(me.name)} wrote on <b>${esc(task.title)}</b>:</p><blockquote style="border-left:3px solid #2E75B6;margin:0;padding:4px 12px;white-space:pre-wrap">${esc(body)}</blockquote>${button(appUrl(`/tasks/${id}`), "Open task")}`,
         );
       if (mentioned.length) await logTaskActivity(id, me.id, "MENTIONED", { users: mentioned.map((u) => u.fullName) });
+      mentionedIds.push(...mentioned.map((u) => u.id));
     }
+    await notifyWatchers(id, me, { title: `${me.name} commented on: ${task.title}`, body: body.length > 300 ? `${body.slice(0, 300)}…` : body, skip: mentionedIds });
     revalidatePath(`/tasks/${id}`);
     return { ok: "Comment added." };
   } catch (e) {
     return toFormError(e);
   }
+}
+
+/** Adds a watcher: anyone who works on the task (creator, assignees, Admins) can add any active colleague. */
+export async function addWatcher(taskId: number, _: ActionState, fd: FormData): Promise<ActionState> {
+  try {
+    const me = await requireUser();
+    const task = await loadTask(taskId);
+    if (!task || !(await canWorkOnTask(me, task))) throw new FormError("You can't add watchers to this task.");
+    const userId = int(fd, "userId");
+    if (!userId) throw new FormError("Choose who should watch the task.");
+    const [user] = await db
+      .select({ id: schema.users.id, fullName: schema.users.fullName })
+      .from(schema.users)
+      .where(and(eq(schema.users.id, userId), eq(schema.users.status, "ACTIVE")));
+    if (!user) throw new FormError("That person isn't an active user.");
+    const [row] = await db.insert(schema.taskWatchers).values({ taskId, userId, addedById: me.id }).onConflictDoNothing().returning();
+    if (!row) return { ok: `${user.fullName} already watches this task.` };
+    await logTaskActivity(taskId, me.id, "WATCHER_ADDED", { user: user.fullName });
+    await notify([user.id], { kind: "TASK_WATCHED", title: `${me.name} added you as a watcher on: ${task.title}`, body: "You'll get updates on its status, due date and comments.", href: `/tasks/${taskId}`, actorId: me.id });
+    revalidatePath(`/tasks/${taskId}`);
+    return { ok: `${user.fullName} now watches this task.` };
+  } catch (e) {
+    return toFormError(e);
+  }
+}
+
+/** Removes a watcher: people who work on the task remove anyone, a watcher can always remove themselves. */
+export async function removeWatcher(taskId: number, userId: number) {
+  const me = await requireUser();
+  const task = await loadTask(taskId);
+  if (!task || (userId !== me.id && !(await canWorkOnTask(me, task)))) redirect(`/tasks/${taskId}?msg=denied`);
+  const [row] = await db
+    .delete(schema.taskWatchers)
+    .where(and(eq(schema.taskWatchers.taskId, taskId), eq(schema.taskWatchers.userId, userId)))
+    .returning();
+  if (row) {
+    const [user] = await db.select({ fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.id, userId));
+    await logTaskActivity(taskId, me.id, userId === me.id ? "STOPPED_WATCHING" : "WATCHER_REMOVED", { user: user?.fullName ?? `#${userId}` });
+  }
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath("/tasks");
+}
+
+/** "Watch" button: anyone who can see the task can follow it themselves. */
+export async function watchTask(taskId: number) {
+  const me = await requireUser();
+  if (!(await canViewTask(me, taskId))) redirect(`/tasks/${taskId}?msg=denied`);
+  const [row] = await db.insert(schema.taskWatchers).values({ taskId, userId: me.id, addedById: me.id }).onConflictDoNothing().returning();
+  if (row) await logTaskActivity(taskId, me.id, "STARTED_WATCHING", { user: me.name });
+  revalidatePath(`/tasks/${taskId}`);
+  revalidatePath("/tasks");
 }
 
 export async function deleteTask(id: number) {

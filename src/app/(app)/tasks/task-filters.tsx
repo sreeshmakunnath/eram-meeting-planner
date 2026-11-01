@@ -23,6 +23,7 @@ export async function TaskFilterBar({ me, f, path, showBucket = true }: { me: Se
         <select name="scope" defaultValue={f.scope ?? "mine"} className="input">
           <option value="mine">Assigned to me</option>
           <option value="created">Created by me</option>
+          <option value="watching">Watching</option>
           {(team.length > 0 || f.scope === "team") && <option value="team">My team&apos;s</option>}
           <option value="all">{isSuperAdmin(me) ? "Everyone's" : isAdmin(me) ? "All in my business units" : "All I can see"}</option>
         </select>

@@ -15,6 +15,7 @@ const KIND: Record<string, { label: string; dot: string }> = {
   BRIEF_SUBMITTED: { label: "Meeting Brief", dot: "bg-navy" },
   TASK_ASSIGNED: { label: "Task", dot: "bg-emerald-600" },
   TASK_COMPLETED: { label: "Task completed", dot: "bg-emerald-600" },
+  TASK_WATCHED: { label: "Watched task", dot: "bg-emerald-600" },
   MENTION: { label: "Mention", dot: "bg-amber-500" },
   GROUP_ADDED: { label: "Group", dot: "bg-slate-500" },
 };

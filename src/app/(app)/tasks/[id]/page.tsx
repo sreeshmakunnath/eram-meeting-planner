@@ -6,7 +6,7 @@ import { AutoSubmitCheckbox } from "@/components/auto-submit-checkbox";
 import { DueDelta } from "@/components/due-delta";
 import { Badge, Empty, fmtDateTime, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
-import { addComment, addSubtask, deleteTask, setTaskStatus, toggleSubtask, updateProgress } from "@/lib/actions/tasks";
+import { addComment, addSubtask, addWatcher, deleteTask, removeWatcher, setTaskStatus, toggleSubtask, updateProgress, watchTask } from "@/lib/actions/tasks";
 import { requireUser } from "@/lib/auth";
 import { fmtDay, fmtPlainDate, PRIORITY_LABEL, todayRiyadh } from "@/lib/meetings";
 import { activeUsers } from "@/lib/queries";
@@ -30,6 +30,7 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
       meeting: { columns: { id: true, title: true, startAt: true } },
       createdBy: { columns: { fullName: true } },
       assignees: { with: { user: { columns: { id: true, fullName: true } }, viaGroup: { columns: { name: true } } } },
+      watchers: { with: { user: { columns: { id: true, fullName: true } } } },
       groups: { with: { group: { columns: { id: true, name: true } } } },
       parent: { columns: { id: true, title: true } },
       businessUnit: { columns: { name: true } },
@@ -47,8 +48,11 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
   const canComment = canWork || (await canCommentOnTask(me, task)); // managers of the people on it can comment
   const [subtasks, people] = await Promise.all([
     Promise.all(task.subtasks.map(async (s) => ({ ...s, canWork: await canWorkOnTask(me, s) }))),
-    task.parentTaskId ? Promise.resolve([]) : activeUsers(),
+    activeUsers(), // subtask and watcher pickers
   ]);
+  const watchers = [...task.watchers].sort((a, b) => a.user.fullName.localeCompare(b.user.fullName));
+  const watching = watchers.some((w) => w.userId === me.id);
+  const notWatching = people.filter((u) => !watchers.some((w) => w.userId === u.id));
   const activity = await db
     .select({ id: schema.taskActivity.id, at: schema.taskActivity.createdAt, action: schema.taskActivity.action, details: schema.taskActivity.details, user: schema.users.fullName })
     .from(schema.taskActivity)
@@ -73,6 +77,8 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
     }
     if (action === "SUBTASK_ADDED") return `"${d.subtask}" for ${d.assignedTo}`;
     if (action === "MENTIONED") return ((d.users as string[]) ?? []).join(", ");
+    if (action === "WATCHER_ADDED" || action === "WATCHER_REMOVED") return String(d.user ?? "");
+    if (action === "STARTED_WATCHING" || action === "STOPPED_WATCHING") return "";
     return Object.entries(d)
       .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`)
       .join(" · ");
@@ -131,6 +137,15 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
               <button className={s === "COMPLETED" ? "btn-primary" : "btn-secondary"}>{label}</button>
             </form>
           ))}
+        {watching ? (
+          <form action={removeWatcher.bind(null, id, me.id)}>
+            <button className="btn-secondary">Stop watching</button>
+          </form>
+        ) : (
+          <form action={watchTask.bind(null, id)}>
+            <button className="btn-secondary">Watch</button>
+          </form>
+        )}
         {editable && (
           <>
             <Link href={`/tasks/${id}/edit`} className="btn-secondary">
@@ -345,6 +360,44 @@ export default async function TaskPage({ params, searchParams }: { params: { id:
                   </li>
                 ))}
             </ul>
+          </section>
+
+          <section className="card">
+            <h2 className="border-b border-slate-200 px-5 py-3 font-semibold text-navy">Watchers</h2>
+            {watchers.length ? (
+              <ul className="divide-y divide-slate-100 text-sm">
+                {watchers.map((w) => (
+                  <li key={w.userId} className="flex items-center justify-between gap-3 px-5 py-2">
+                    {w.user.fullName}
+                    {(canWork || w.userId === me.id) && (
+                      <form action={removeWatcher.bind(null, id, w.userId)}>
+                        <button className="text-xs text-slate-500 hover:text-red-600" aria-label={`Remove ${w.user.fullName}`}>
+                          Remove
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="px-5 py-3 text-sm text-slate-500">No one is watching this task.</p>
+            )}
+            {canWork && (
+              <ActionForm action={addWatcher.bind(null, id)} className="flex gap-2 border-t border-slate-100 p-4">
+                <select name="userId" className="input" defaultValue="" required aria-label="Add a watcher">
+                  <option value="" disabled>
+                    Add a watcher…
+                  </option>
+                  {notWatching.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.fullName}
+                    </option>
+                  ))}
+                </select>
+                <SubmitButton variant="secondary">Add</SubmitButton>
+              </ActionForm>
+            )}
+            <p className="px-5 pb-3 text-xs text-slate-500">Watchers see the task and its subtasks, can comment, and get notified of status, due date and comment changes. It isn&apos;t counted as their work.</p>
           </section>
         </aside>
       </div>

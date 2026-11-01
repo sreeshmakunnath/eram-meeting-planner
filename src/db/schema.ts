@@ -585,6 +585,22 @@ export const taskGroups = pgTable(
   (t) => [primaryKey({ columns: [t.taskId, t.groupId] })],
 );
 
+/** People following a task without working on it: they see it (and its subtasks), comment, and get updates. */
+export const taskWatchers = pgTable(
+  "task_watchers",
+  {
+    taskId: integer("task_id")
+      .notNull()
+      .references(() => tasks.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedById: integer("added_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.userId] }), index("task_watchers_user_idx").on(t.userId)],
+);
+
 export const taskComments = pgTable(
   "task_comments",
   {
@@ -621,6 +637,7 @@ export const tasksRelations = relations(tasks, ({ one, many }) => ({
   client: one(clients, { fields: [tasks.clientId], references: [clients.id] }),
   createdBy: one(users, { fields: [tasks.createdById], references: [users.id] }),
   assignees: many(taskAssignees),
+  watchers: many(taskWatchers),
   groups: many(taskGroups),
   parent: one(tasks, { fields: [tasks.parentTaskId], references: [tasks.id], relationName: "subtasks" }),
   businessUnit: one(businessUnits, { fields: [tasks.businessUnitId], references: [businessUnits.id] }),
@@ -631,6 +648,10 @@ export const taskAssigneesRelations = relations(taskAssignees, ({ one }) => ({
   task: one(tasks, { fields: [taskAssignees.taskId], references: [tasks.id] }),
   user: one(users, { fields: [taskAssignees.userId], references: [users.id] }),
   viaGroup: one(groups, { fields: [taskAssignees.viaGroupId], references: [groups.id] }),
+}));
+export const taskWatchersRelations = relations(taskWatchers, ({ one }) => ({
+  task: one(tasks, { fields: [taskWatchers.taskId], references: [tasks.id] }),
+  user: one(users, { fields: [taskWatchers.userId], references: [users.id] }),
 }));
 export const taskGroupsRelations = relations(taskGroups, ({ one }) => ({
   task: one(tasks, { fields: [taskGroups.taskId], references: [tasks.id] }),

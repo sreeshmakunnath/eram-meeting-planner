@@ -60,7 +60,7 @@ async function MyWork({ me }: { me: SessionUser }) {
   const weekStart = riyadh(new Date(Date.parse(`${today}T00:00:00Z`) - dow * 86400_000).toISOString().slice(0, 10), "00:00");
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
   const now = new Date();
-  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team] = await Promise.all([
+  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched] = await Promise.all([
     db
       .select({ id: schema.groups.id, name: schema.groups.name })
       .from(schema.groupMembers)
@@ -97,6 +97,7 @@ async function MyWork({ me }: { me: SessionUser }) {
       ),
     listTasks(personal, { scope: "mine", bucket: "open" }, 1000),
     teamTaskStats(me),
+    listTasks(me, { scope: "watching", bucket: "open" }, 1000),
   ]);
   const myOverdue = myOpen.filter((t) => t.overdue);
   const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
@@ -122,9 +123,14 @@ async function MyWork({ me }: { me: SessionUser }) {
           <div className="max-h-[26rem] overflow-y-auto">
             <TaskMiniList rows={mySoon} empty="Nothing due in the next 7 days." />
           </div>
-          {myActions.n > 0 && (
+          {(myActions.n > 0 || watched.length > 0) && (
             <p className="mt-auto border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
-              You also own the next action on {myActions.n} open meeting{myActions.n === 1 ? "" : "s"}.
+              {myActions.n > 0 && <>You also own the next action on {myActions.n} open meeting{myActions.n === 1 ? "" : "s"}. </>}
+              {watched.length > 0 && (
+                <Link href="/tasks?scope=watching" className="link">
+                  Watching {watched.length} open task{watched.length === 1 ? "" : "s"} →
+                </Link>
+              )}
             </p>
           )}
         </section>

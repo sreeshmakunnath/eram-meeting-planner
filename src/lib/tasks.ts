@@ -74,6 +74,12 @@ function myOwnTask(me: SessionUser): SQL {
   )!;
 }
 
+/** Tasks the person watches, and the subtasks of those tasks. */
+export function watchedTask(me: SessionUser): SQL {
+  return sql`(exists (select 1 from task_watchers tw where tw.task_id = ${t.id} and tw.user_id = ${me.id})
+    or ${t.parentTaskId} in (select tw.task_id from task_watchers tw where tw.user_id = ${me.id}))`;
+}
+
 /** Tasks created by or assigned to someone under this manager in the reporting lines (any depth). */
 function myTeamTask(me: SessionUser): SQL {
   const team = teamOf(me.id);
@@ -87,7 +93,7 @@ export const assignedToMyTeam = (me: SessionUser): SQL =>
 /**
  * Super Admins see every task; BU Admins see the tasks of their business units. Everyone sees tasks they
  * created or are assigned to (directly or through a group they're in), the subtasks of those tasks, and the
- * main task of a subtask assigned to them. Managers also see their reportees' tasks.
+ * main task of a subtask assigned to them. Managers also see their reportees' tasks; watchers see what they watch.
  */
 export function taskVisibleTo(me: SessionUser): SQL | undefined {
   if (isSuperAdmin(me)) return undefined;
@@ -95,6 +101,7 @@ export function taskVisibleTo(me: SessionUser): SQL | undefined {
     isAdmin(me) ? taskInMyBus(me) : undefined,
     myOwnTask(me),
     myTeamTask(me),
+    watchedTask(me),
     sql`${t.parentTaskId} in (select p.id from tasks p where p.created_by_id = ${me.id} or exists (select 1 from task_assignees pa where pa.task_id = p.id and pa.user_id = ${me.id}))`,
     sql`exists (select 1 from tasks s join task_assignees sa on sa.task_id = s.id where s.parent_task_id = ${t.id} and sa.user_id = ${me.id})`,
   );
@@ -127,11 +134,32 @@ export async function canWorkOnTask(me: SessionUser, task: TaskRef) {
   return !!row;
 }
 
-/** Comments: whoever can work on the task, and managers of the people on it (they view and comment, nothing more). */
+/** Comments: whoever can work on the task, managers of the people on it and its watchers (they view and comment, nothing more). */
 export async function canCommentOnTask(me: SessionUser, task: TaskRef) {
   if (await canWorkOnTask(me, task)) return true;
-  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), myTeamTask(me)));
+  const [row] = await db.select({ id: t.id }).from(t).where(and(eq(t.id, task.id), or(myTeamTask(me), watchedTask(me))));
   return !!row;
+}
+
+/**
+ * Tells the task's active watchers what changed: in-app always, by email only when `email` is set (completion).
+ * The person who made the change and anyone in `skip` (already told another way) are left out.
+ */
+export async function notifyWatchers(taskId: number, actor: SessionUser, n: { title: string; body?: string | null; email?: string; skip?: number[] }) {
+  const rows = await db
+    .select({ id: schema.users.id, email: schema.users.email, fullName: schema.users.fullName })
+    .from(schema.taskWatchers)
+    .innerJoin(schema.users, eq(schema.taskWatchers.userId, schema.users.id))
+    .where(and(eq(schema.taskWatchers.taskId, taskId), eq(schema.users.status, "ACTIVE")));
+  const people = rows.filter((p) => p.id !== actor.id && !n.skip?.includes(p.id));
+  if (!people.length) return;
+  await notify(
+    people.map((p) => p.id),
+    { kind: "TASK_WATCHED", title: n.title, body: n.body, href: `/tasks/${taskId}`, actorId: actor.id },
+  );
+  if (n.email)
+    for (const p of people)
+      await sendMail(p.email, n.title, "Update on a task you watch", `<p>Hello ${esc(p.fullName)},</p>${n.email}${button(appUrl(`/tasks/${taskId}`), "Open task")}`);
 }
 
 /** A main task's % complete follows its subtasks (cancelled ones don't count); work on a subtask starts the main task. */
