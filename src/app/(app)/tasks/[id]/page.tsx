@@ -129,6 +129,15 @@ export default async function TaskPage(props: { params: Promise<{ id: string }>;
           . Changing the action on the brief updates this task.
         </Notice>
       )}
+      {task.fromMeetingFollowUp && task.meeting && (
+        <Notice tone="info">
+          Next action &amp; follow-up of the meeting{" "}
+          <Link href={`/meetings/${task.meeting.id}`} className="underline">
+            {task.meeting.title}
+          </Link>
+          . Changing the next action, follow-up date or action owners on the meeting updates this task.
+        </Notice>
+      )}
       <div className="mb-5 flex flex-wrap gap-2">
         {canWork &&
           quick.map(([s, label]) => (
@@ -165,7 +174,9 @@ export default async function TaskPage(props: { params: Promise<{ id: string }>;
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
-          {task.description && !(task.sourceBriefId && task.description.startsWith("Agreed action from")) && (
+          {task.description &&
+            !(task.sourceBriefId && task.description.startsWith("Agreed action from")) &&
+            !(task.fromMeetingFollowUp && task.description.startsWith("Next action from")) && (
             <div className="card whitespace-pre-wrap p-5 text-sm">{task.description}</div>
           )}
 

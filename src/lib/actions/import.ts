@@ -7,6 +7,8 @@ import { audit } from "@/lib/audit";
 import { requireSuperAdmin } from "@/lib/auth";
 import { logActivity, riyadh } from "@/lib/meetings";
 import { cleanClientName, looksLike } from "@/lib/client-names";
+import { syncFollowUpTask } from "@/lib/meeting-follow-up-task";
+import { notifyTaskAssigned } from "@/lib/tasks";
 import { asDate, asTime, norm, splitNames, text } from "@/lib/xl-read";
 
 export type ImportResult = {
@@ -182,6 +184,8 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
     const buIds = bus.filter((b) => buText.includes(b.name.toLowerCase())).map((b) => b.id);
     if (buIds.length) await db.insert(schema.meetingBusinessUnits).values(buIds.map((businessUnitId) => ({ meetingId: mtg.id, businessUnitId })));
     await logActivity(mtg.id, admin.id, "CREATED", { status, from: `Excel import (${file.name}, row ${r})` });
+    const followUp = await syncFollowUpTask(db, mtg.id, admin.id);
+    if (followUp?.notifyUserIds.length) await notifyTaskAssigned(followUp.taskId, followUp.notifyUserIds, admin.name, admin.id);
     result.created++;
   }
 

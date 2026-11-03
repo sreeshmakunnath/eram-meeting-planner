@@ -543,6 +543,8 @@ export const tasks = pgTable(
     sourcePosition: integer("source_position"),
     /** The brief_actions row this task came from — stays the same when the brief is edited. */
     sourceActionId: integer("source_action_id").references(() => briefActions.id, { onDelete: "set null" }),
+    /** Set when the task is the meeting's own Next action / Follow-up date (kept in step when the meeting is edited). */
+    fromMeetingFollowUp: boolean("from_meeting_follow_up").default(false).notNull(),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     createdById: integer("created_by_id").references(() => users.id),
     createdAt: createdAt(),

@@ -1,0 +1,1 @@
+ALTER TABLE "tasks" ADD COLUMN "from_meeting_follow_up" boolean DEFAULT false NOT NULL;

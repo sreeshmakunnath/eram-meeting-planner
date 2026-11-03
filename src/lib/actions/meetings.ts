@@ -8,6 +8,8 @@ import { audit } from "@/lib/audit";
 import { canSeeClient, contactVisibleTo, mergeBuIds } from "@/lib/access";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { assertClientName } from "@/lib/client-names";
+import { cancelFollowUpTask, syncFollowUpTask } from "@/lib/meeting-follow-up-task";
+import { notifyTaskAssigned } from "@/lib/tasks";
 import { notify } from "@/lib/notifications";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
@@ -310,7 +312,13 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     await replace(schema.meetingGroups, schema.meetingGroups.meetingId, groupIds.map((groupId) => ({ meetingId, groupId })));
     await replace(schema.meetingContacts, schema.meetingContacts.meetingId, (await meetingContactIds(me, ints(fd, "contactIds"), before?.id)).map((contactId) => ({ meetingId, contactId })));
     await replace(schema.meetingBusinessUnits, schema.meetingBusinessUnits.meetingId, buIds.map((businessUnitId) => ({ meetingId, businessUnitId })));
+    const ownersBefore = before
+      ? (await db.select({ userId: schema.meetingActionOwners.userId }).from(schema.meetingActionOwners).where(eq(schema.meetingActionOwners.meetingId, meetingId))).map((o) => o.userId)
+      : undefined;
     await replace(schema.meetingActionOwners, schema.meetingActionOwners.meetingId, ints(fd, "ownerIds").map((userId) => ({ meetingId, userId })));
+    // Next action / follow-up date → a task for the action owner(s), created by the organiser
+    const followUp = await syncFollowUpTask(db, meetingId, me.id, ownersBefore);
+    if (followUp?.notifyUserIds.length) await notifyTaskAssigned(followUp.taskId, followUp.notifyUserIds, await organiserName(followUp.organiserId, me), me.id);
 
     // Activity log
     if (!before) await logActivity(meetingId, me.id, "CREATED", { status, start: startAt?.toISOString() ?? null });
@@ -351,6 +359,13 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
   redirect(`/meetings/${id}?msg=saved`);
 }
 
+/** "From …" on the task-assigned notice: the organiser, who the follow-up task is created by. */
+async function organiserName(organiserId: number, me: SessionUser) {
+  if (organiserId === me.id) return me.name;
+  const [u] = await db.select({ n: schema.users.fullName }).from(schema.users).where(eq(schema.users.id, organiserId));
+  return u?.n ?? me.name;
+}
+
 async function loadEditable(me: SessionUser, id: number) {
   const m = await db.query.meetings.findFirst({ where: eq(schema.meetings.id, id), with: { attendees: true } });
   if (!m || !(await canEditMeeting(me, m))) redirect(`/meetings/${id}?msg=denied`);
@@ -378,6 +393,7 @@ export async function deleteMeeting(id: number) {
   const m = await loadEditable(me, id);
   if (LIVE.includes(m.status)) await notifyMeeting(id, m.attendees.map((a) => a.userId), "CANCEL", "Cancelled", await externalAttendees(id), me.id);
   await db.update(schema.meetingBriefs).set({ followUpMeetingId: null }).where(eq(schema.meetingBriefs.followUpMeetingId, id));
+  await cancelFollowUpTask(db, id, me.id);
   await db.update(schema.meetings).set({ parentMeetingId: null }).where(eq(schema.meetings.parentMeetingId, id));
   await db.delete(schema.meetings).where(eq(schema.meetings.id, id));
   // Its notifications stay (they say it was cancelled) but no longer link to the deleted meeting.
