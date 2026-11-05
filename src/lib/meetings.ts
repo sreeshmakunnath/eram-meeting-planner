@@ -2,6 +2,7 @@ import { and, eq, exists, inArray, not, or, sql, type SQL } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { clientInMyBus, teamOf } from "./access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
+import { systemLogMeeting } from "./system-log";
 
 // ---------- labels ----------
 export const MEETING_STATUSES = ["TO_BE_SCHEDULED", "SCHEDULED", "CONFIRMED", "COMPLETED", "POSTPONED", "CANCELLED"] as const;
@@ -135,6 +136,7 @@ export async function canWriteBrief(me: SessionUser, meetingId: number) {
 // ---------- activity log ----------
 export async function logActivity(meetingId: number, userId: number | null, action: string, details?: Record<string, unknown>) {
   await db.insert(schema.meetingActivity).values({ meetingId, userId, action, details: details ?? null });
+  await systemLogMeeting(meetingId, userId, action, details); // meetings created / briefs submitted → the daily log
 }
 
 // ---------- calendar invite (.ics) ----------

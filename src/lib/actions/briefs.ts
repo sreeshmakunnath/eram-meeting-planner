@@ -10,6 +10,7 @@ import { notifyTaskAssigned } from "@/lib/tasks";
 import { FormError, int, ints, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { notify } from "@/lib/notifications";
+import { systemLogAttendance } from "@/lib/system-log";
 import { canEditMeeting, canWriteBrief, fmtDay, fmtPlainDate, fmtTime, logActivity } from "@/lib/meetings";
 
 export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -121,6 +122,7 @@ export async function saveBrief(_: ActionState, fd: FormData): Promise<ActionSta
         await db.update(schema.meetings).set({ followUpDate: data.nextFollowUpDate }).where(eq(schema.meetings.id, meetingId));
         await logActivity(f.id, me.id, "CREATED", { status: "TO_BE_SCHEDULED", from: `brief of meeting #${meetingId}` });
       }
+      await systemLogAttendance(meetingId, attended.filter((u) => m.attendees.some((a) => a.userId === u)));
       await emailBrief(meetingId, me.id);
       // Every agreed action becomes (or updates) a task in the task planner
       const synced = await syncBriefTasks(db, briefId, me.id);

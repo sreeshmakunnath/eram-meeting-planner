@@ -18,6 +18,8 @@ const KIND: Record<string, { label: string; dot: string }> = {
   TASK_WATCHED: { label: "Watched task", dot: "bg-emerald-600" },
   MENTION: { label: "Mention", dot: "bg-amber-500" },
   GROUP_ADDED: { label: "Group", dot: "bg-slate-500" },
+  CLIENT_PENDING: { label: "Client to review", dot: "bg-amber-500" },
+  CLIENT_REVIEWED: { label: "Client", dot: "bg-amber-500" },
 };
 
 export default async function NotificationsPage() {

@@ -4,7 +4,7 @@ import { Badge, Empty, Notice, PageHeader } from "@/components/ui";
 import { teamIds } from "@/lib/access";
 import { deleteLog } from "@/lib/actions/daily-log";
 import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
-import { ACTIVITY_LABEL, ACTIVITY_TYPES, canEditLog, defaultRange, EDIT_DAYS, fmtMinutes, listLogs, logWhere, type LogFilters, type LogRow } from "@/lib/daily-log";
+import { ACTIVITY_LABEL, ALL_ACTIVITY_TYPES, canEditLog, defaultRange, EDIT_DAYS, fmtMinutes, listLogs, logWhere, type LogFilters, type LogRow } from "@/lib/daily-log";
 import { fmtPlainDate } from "@/lib/meetings";
 import { activeUsers, clientOptions } from "@/lib/queries";
 import { LogForm } from "./log-form";
@@ -32,14 +32,14 @@ export default async function DailyLogPage(props: { searchParams: Promise<LogFil
   const days = new Map<string, LogRow[]>();
   for (const r of rows) days.set(r.logDate, [...(days.get(r.logDate) ?? []), r]);
   const total = rows.reduce((n, r) => n + (r.minutes ?? 0), 0);
-  const byType = ACTIVITY_TYPES.map((t) => ({ t, n: rows.filter((r) => r.type === t).length, min: rows.filter((r) => r.type === t).reduce((n, r) => n + (r.minutes ?? 0), 0) })).filter((x) => x.n);
+  const byType = ALL_ACTIVITY_TYPES.map((t) => ({ t, n: rows.filter((r) => r.type === t).length, min: rows.filter((r) => r.type === t).reduce((n, r) => n + (r.minutes ?? 0), 0) })).filter((x) => x.n);
   const byPerson = scope === "mine" ? [] : [...new Set(rows.map((r) => r.user))].map((name) => ({ name, n: rows.filter((r) => r.user === name).length })).sort((a, b) => b.n - a.n);
 
   return (
     <>
       <PageHeader
         title="Daily log"
-        subtitle={`What you did, in your own words: calls, visits, research, proposals. You can edit an entry for ${EDIT_DAYS} days.`}
+        subtitle={`What you did, in your own words: calls, visits, research, proposals. You can edit an entry for ${EDIT_DAYS} days. Meetings, tasks and new clients are added automatically as System entries.`}
         actions={
           <a href={`/api/log/export?${qs}`} className="btn-secondary">
             Export Excel
@@ -52,7 +52,7 @@ export default async function DailyLogPage(props: { searchParams: Promise<LogFil
         <LogForm options={options} />
       </section>
 
-      <FilterBar clearHref="/log" active={countActive(f as Record<string, string | undefined>, ["scope", "user", "client", "type", "from", "to", "q"], { scope: "mine" })}>
+      <FilterBar clearHref="/log" active={countActive(f as Record<string, string | undefined>, ["scope", "user", "client", "type", "source", "from", "to", "q"], { scope: "mine" })}>
         {canSeeOthers && (
           <FilterField label="Show">
             <select name="scope" defaultValue={scope} className="input">
@@ -87,11 +87,18 @@ export default async function DailyLogPage(props: { searchParams: Promise<LogFil
         <FilterField label="Type" size="sm">
           <select name="type" defaultValue={f.type ?? ""} className="input">
             <option value="">All</option>
-            {ACTIVITY_TYPES.map((t) => (
+            {ALL_ACTIVITY_TYPES.map((t) => (
               <option key={t} value={t}>
                 {ACTIVITY_LABEL[t]}
               </option>
             ))}
+          </select>
+        </FilterField>
+        <FilterField label="Entries" size="sm">
+          <select name="source" defaultValue={f.source ?? ""} className="input">
+            <option value="">All</option>
+            <option value="written">Written</option>
+            <option value="system">System</option>
           </select>
         </FilterField>
         <FilterField label="From" size="sm">
@@ -126,6 +133,7 @@ export default async function DailyLogPage(props: { searchParams: Promise<LogFil
                       <li key={r.id} className="px-4 py-3 text-sm">
                         <div className="flex flex-wrap items-center gap-2">
                           <Badge tone="blue">{ACTIVITY_LABEL[r.type]}</Badge>
+                          {r.system && <Badge>System</Badge>}
                           {r.userId !== me.id && <b className="text-slate-700">{r.user}</b>}
                           {r.minutes ? <span className="text-xs text-slate-500">{fmtMinutes(r.minutes)}</span> : null}
                           {canEditLog(me, r) && (

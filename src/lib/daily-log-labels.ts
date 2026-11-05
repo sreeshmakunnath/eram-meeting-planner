@@ -1,7 +1,14 @@
 // Daily log labels and choices. No database imports: the log form (a client component) uses these.
+/** Types people pick when they write an entry. */
 export const ACTIVITY_TYPES = ["CLIENT_CALL", "EMAIL_FOLLOW_UP", "SITE_VISIT", "RESEARCH", "PROPOSAL", "INTERNAL_MEETING", "ADMIN", "OTHER"] as const;
-export type ActivityType = (typeof ACTIVITY_TYPES)[number];
+/** Types of the entries the system adds from what people do in the planner (never picked by hand). */
+export const SYSTEM_ACTIVITY_TYPES = ["MEETING", "TASK", "CLIENT_ADDED"] as const;
+export const ALL_ACTIVITY_TYPES = [...ACTIVITY_TYPES, ...SYSTEM_ACTIVITY_TYPES] as const;
+export type ActivityType = (typeof ALL_ACTIVITY_TYPES)[number];
 export const ACTIVITY_LABEL: Record<ActivityType, string> = {
+  MEETING: "Meeting",
+  TASK: "Task",
+  CLIENT_ADDED: "Client added",
   CLIENT_CALL: "Client call",
   EMAIL_FOLLOW_UP: "Email / follow-up",
   SITE_VISIT: "Site visit",

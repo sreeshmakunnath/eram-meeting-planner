@@ -9,6 +9,8 @@ import { canSeeClient, contactVisibleTo, mergeBuIds } from "@/lib/access";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { assertClientName } from "@/lib/client-names";
 import { cancelFollowUpTask, syncFollowUpTask } from "@/lib/meeting-follow-up-task";
+import { systemLogClientAdded } from "@/lib/system-log";
+import { notifyClientPending } from "@/lib/client-approval";
 import { notifyTaskAssigned } from "@/lib/tasks";
 import { notify } from "@/lib/notifications";
 import { FormError, int, ints, req, str, toFormError } from "@/lib/form";
@@ -228,6 +230,8 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
       }
       if (clientBus.length) await db.insert(schema.clientBusinessUnits).values(clientBus.map((businessUnitId) => ({ clientId: c.id, businessUnitId })));
       await audit(me.id, "CLIENT_CREATED", "client", c.id, { name, from: "meeting form" });
+      await systemLogClientAdded(c.id, me.id, name, "from the meeting form");
+      if (c.status === "PENDING_REVIEW") await notifyClientPending(c.id, me);
     } else if (clientField) {
       clientId = Number(clientField);
       if (clientId !== before?.clientId && !(await canSeeClient(me, clientId))) throw new FormError("You don't have access to that client.");

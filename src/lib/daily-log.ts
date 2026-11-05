@@ -4,10 +4,10 @@ import { and, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from "driz
 import { db, schema } from "@/db";
 import { teamOf } from "./access";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
-import { ACTIVITY_TYPES, type ActivityType } from "./daily-log-labels";
+import { ALL_ACTIVITY_TYPES, type ActivityType } from "./daily-log-labels";
 import { todayRiyadh } from "./meetings";
 
-export { ACTIVITY_LABEL, ACTIVITY_TYPES, DURATIONS, fmtMinutes, type ActivityType } from "./daily-log-labels";
+export { ACTIVITY_LABEL, ACTIVITY_TYPES, ALL_ACTIVITY_TYPES, DURATIONS, fmtMinutes, type ActivityType } from "./daily-log-labels";
 
 /** How long the writer can still edit or delete an entry. */
 export const EDIT_DAYS = 7;
@@ -19,14 +19,16 @@ export function logVisibleTo(me: SessionUser): SQL | undefined {
   return or(eq(l.userId, me.id), sql`${l.userId} in ${teamOf(me.id)}`, isAdmin(me) ? inArray(l.businessUnitId, me.buIds) : undefined);
 }
 
-export const canEditLog = (me: SessionUser, entry: { userId: number; createdAt: Date }) =>
-  entry.userId === me.id && Date.now() - entry.createdAt.getTime() < EDIT_DAYS * 86400_000;
+/** System entries are never editable; people edit their own written entries for EDIT_DAYS. */
+export const canEditLog = (me: SessionUser, entry: { userId: number; createdAt: Date; system: boolean }) =>
+  !entry.system && entry.userId === me.id && Date.now() - entry.createdAt.getTime() < EDIT_DAYS * 86400_000;
 
 export type LogFilters = {
   scope?: string; // "mine" (default) | "team" (my reportees) | "all" (everything I can see)
   user?: string;
   client?: string;
   type?: string;
+  source?: string; // "" (all) | "written" | "system"
   from?: string; // YYYY-MM-DD, default 6 days ago
   to?: string; // default today
   q?: string;
@@ -43,7 +45,9 @@ export function logWhere(me: SessionUser, f: LogFilters, extra?: SQL): SQL | und
   if (scope === "team") w.push(sql`${l.userId} in ${teamOf(me.id)}`);
   if (f.user) w.push(eq(l.userId, Number(f.user)));
   if (f.client) w.push(eq(l.clientId, Number(f.client)));
-  if (f.type && (ACTIVITY_TYPES as readonly string[]).includes(f.type)) w.push(eq(l.type, f.type as ActivityType));
+  if (f.type && (ALL_ACTIVITY_TYPES as readonly string[]).includes(f.type)) w.push(eq(l.type, f.type as ActivityType));
+  if (f.source === "written") w.push(eq(l.system, false));
+  if (f.source === "system") w.push(eq(l.system, true));
   w.push(gte(l.logDate, f.from || range.from), lte(l.logDate, f.to || range.to));
   if (f.q) w.push(ilike(l.description, `%${f.q}%`));
   const list = w.filter(Boolean) as SQL[];
@@ -61,6 +65,7 @@ export function listLogs(where: SQL | undefined, limit = 1000) {
       type: l.type,
       description: l.description,
       minutes: l.minutes,
+      system: l.system,
       clientId: l.clientId,
       client: schema.clients.name,
       taskId: l.taskId,

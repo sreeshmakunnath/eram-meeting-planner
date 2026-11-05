@@ -11,6 +11,8 @@ import { isAdmin, requireAdmin, requireSuperAdmin, requireUser, type SessionUser
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { assertClientName, clientNameMatches, type ClientNameMatches } from "@/lib/client-names";
 import { BD_STAGES, CLIENT_STATUSES, CLIENT_TYPES } from "@/lib/queries";
+import { systemLogClientAdded } from "@/lib/system-log";
+import { notifyClientDecision, notifyClientPending } from "@/lib/client-approval";
 
 function readClient(fd: FormData) {
   const type = str(fd, "type") as (typeof CLIENT_TYPES)[number];
@@ -79,6 +81,8 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       id = c.id;
       await setBusinessUnits(id, bus.ids);
       await audit(me.id, "CLIENT_CREATED", "client", id, { name: data.name, status });
+      await systemLogClientAdded(id, me.id, data.name);
+      if (status === "PENDING_REVIEW") await notifyClientPending(id, me);
     }
   } catch (e) {
     return toFormError(e);
@@ -91,10 +95,14 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
 export async function approveClient(id: number, fd: FormData) {
   const me = await requireUser();
   const [client] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
-  if (!client || client.status !== "PENDING_REVIEW" || !(await canApproveClient(me, client))) redirect(`/clients/${id}?msg=denied`);
+  // Already approved (e.g. Approve clicked twice, or approved by someone else meanwhile): nothing to do.
+  if (client && client.status !== "PENDING_REVIEW") redirect(`/clients/${id}?msg=${client.status === "ACTIVE" ? "approved" : "denied"}`);
+  if (!client || !(await canApproveClient(me, client))) redirect(`/clients/${id}?msg=denied`);
   const asAdmin = isAdmin(me) && (await canManageClient(me, { id, accountOwnerId: null }));
   await db.update(schema.clients).set({ status: "ACTIVE" }).where(eq(schema.clients.id, id));
-  await audit(me.id, "CLIENT_APPROVED", "client", id, { as: asAdmin ? "Admin" : "Manager", remarks: str(fd, "remarks")?.slice(0, 1000) ?? null });
+  const remarks = str(fd, "remarks")?.slice(0, 1000) ?? null;
+  await audit(me.id, "CLIENT_APPROVED", "client", id, { as: asAdmin ? "Admin" : "Manager", remarks });
+  await notifyClientDecision(client, me, { approved: true, remarks });
   revalidatePath("/clients");
   redirect(`/clients/${id}?msg=approved`);
 }
@@ -114,6 +122,7 @@ export async function mergeClient(id: number, fd: FormData) {
   await db.update(schema.clientContacts).set({ clientId: targetId, isPrimary: false }).where(eq(schema.clientContacts.clientId, id));
   await db.delete(schema.clients).where(eq(schema.clients.id, id));
   await audit(admin.id, "CLIENT_MERGED", "client", targetId, { mergedFrom: id, mergedName: from.name });
+  if (from.status === "PENDING_REVIEW") await notifyClientDecision(from, admin, { approved: false, mergedInto: { id: to.id, name: to.name } });
   revalidatePath("/clients");
   redirect(`/clients/${targetId}?msg=merged`);
 }

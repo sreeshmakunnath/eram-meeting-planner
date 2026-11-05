@@ -16,6 +16,7 @@ import { logFormOptions } from "./log/options";
 import { BuTable, KpiTile, MonthColumns, OrderedBars, StackedShare } from "@/components/dashboard-charts";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
 import { orgStats } from "@/lib/org-stats";
+import { clientsToApprove } from "@/lib/client-approval";
 import { fmtDay, fmtTime, involves, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
 
 function Tile({ label, value, href }: { label: string; value: number | string; href?: string }) {
@@ -63,7 +64,7 @@ async function MyWork({ me }: { me: SessionUser }) {
   const weekStart = riyadh(new Date(Date.parse(`${today}T00:00:00Z`) - dow * 86400_000).toISOString().slice(0, 10), "00:00");
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
   const now = new Date();
-  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions] = await Promise.all([
+  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions, toApprove] = await Promise.all([
     db
       .select({ id: schema.groups.id, name: schema.groups.name })
       .from(schema.groupMembers)
@@ -102,6 +103,7 @@ async function MyWork({ me }: { me: SessionUser }) {
     teamTaskStats(me),
     listTasks(me, { scope: "watching", bucket: "open" }, 1000),
     logFormOptions(me),
+    clientsToApprove(me),
   ]);
   const myOverdue = myOpen.filter((t) => t.overdue);
   const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
@@ -115,6 +117,31 @@ async function MyWork({ me }: { me: SessionUser }) {
         <Tile label="My overdue tasks" value={myOverdue.length} href="/tasks?bucket=overdue" />
         <Tile label="Briefs to write" value={briefsPending.n} href="/meetings?status=ALL" />
       </div>
+      {toApprove.length > 0 && (
+        <section className="card mb-4 border-amber-200 bg-amber-50/50 px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-amber-900">
+              Clients waiting for your approval <span className="ml-1 rounded-full bg-amber-200 px-2 py-0.5 text-xs">{toApprove.length === 50 ? "50+" : toApprove.length}</span>
+            </h3>
+            <Link href="/clients?status=PENDING_REVIEW" className="link text-sm">
+              All pending →
+            </Link>
+          </div>
+          {/* One row of cards; more scroll sideways instead of making the page longer. */}
+          <ul className="flex gap-2 overflow-x-auto pb-1">
+            {toApprove.slice(0, 12).map((c) => (
+              <li key={c.id} className="shrink-0">
+                <Link href={`/clients/${c.id}`} className="block w-56 rounded-md border border-amber-200 bg-white px-3 py-2 text-sm hover:border-amber-400">
+                  <div className="truncate font-medium text-navy">{c.name}</div>
+                  <div className="truncate text-xs text-slate-500">
+                    {[c.country, c.addedBy && `by ${c.addedBy}`, fmtDateTime(c.createdAt)].filter(Boolean).join(" · ")}
+                  </div>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <section className="card mb-4 px-4 py-3">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="font-semibold text-navy">Log an activity (today)</h3>

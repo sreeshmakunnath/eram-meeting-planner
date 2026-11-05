@@ -12,7 +12,9 @@ export type NotificationKind =
   | "TASK_WATCHED"
   | "MENTION"
   | "GROUP_ADDED"
-  | "CONTACT_SHARED";
+  | "CONTACT_SHARED"
+  | "CLIENT_PENDING"
+  | "CLIENT_REVIEWED";
 
 /**
  * Saves an in-app notification for each user (the person who caused it is left out).

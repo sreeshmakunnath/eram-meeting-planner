@@ -706,6 +706,10 @@ export const activityTypeEnum = pgEnum("activity_type", [
   "INTERNAL_MEETING",
   "ADMIN",
   "OTHER",
+  // added by the system from what people do in the planner
+  "MEETING",
+  "TASK",
+  "CLIENT_ADDED",
 ]);
 
 /** One entry in a person's daily log. Owner-only edits for 7 days after it was written; then it's locked. */
@@ -728,10 +732,15 @@ export const dailyLogs = pgTable(
     businessUnitId: integer("business_unit_id")
       .notNull()
       .references(() => businessUnits.id),
+    /** Added by the system (meeting created, task completed…), not written by the person. Never editable. */
+    system: boolean("system").default(false).notNull(),
+    /** What a system entry records, e.g. "task:12:COMPLETED:2026-11-05": the same thing is logged once. */
+    systemKey: varchar("system_key", { length: 100 }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    uniqueIndex("daily_logs_system_key_idx").on(t.userId, t.systemKey),
     index("daily_logs_user_date_idx").on(t.userId, t.logDate),
     index("daily_logs_client_idx").on(t.clientId),
     index("daily_logs_task_idx").on(t.taskId),

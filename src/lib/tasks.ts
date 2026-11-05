@@ -5,6 +5,7 @@ import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 import { appUrl, button, esc, sendMail } from "./mail";
 import { fmtPlainDate, riyadhParts } from "./meetings";
 import { notify } from "./notifications";
+import { systemLogTask } from "./system-log";
 
 /** Days between the due date and completion (Saudi dates): negative = early, 0 = on the day, positive = late. */
 export function completionDelta(dueDate: string | null, completedAt: Date | null) {
@@ -177,6 +178,7 @@ export async function syncParentProgress(parentId: number) {
 
 export async function logTaskActivity(taskId: number, userId: number | null, action: string, details?: Record<string, unknown>) {
   await db.insert(schema.taskActivity).values({ taskId, userId, action, details: details ?? null });
+  await systemLogTask(taskId, userId, action, details); // tasks created / status changes → the person's daily log
 }
 
 /** Group members (active users) + direct picks. Direct picks win over a group link. */

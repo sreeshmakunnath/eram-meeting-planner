@@ -153,7 +153,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
           <div className="flex flex-wrap items-center gap-3">
             <form action={approveClient.bind(null, id)} className="flex flex-wrap items-center gap-2">
               <input name="remarks" maxLength={1000} placeholder="Remarks (optional), e.g. checked with the BD team" className="input w-80 max-w-full" />
-              <button className="btn-primary">Approve</button>
+              <SubmitButton>Approve</SubmitButton>
             </form>
             {canMerge && (
               <form action={mergeClient.bind(null, id)} className="flex items-center gap-2">
@@ -165,7 +165,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
                     </option>
                   ))}
                 </select>
-                <button className="btn-secondary">Merge</button>
+                <SubmitButton variant="secondary">Merge</SubmitButton>
               </form>
             )}
           </div>

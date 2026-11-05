@@ -13,6 +13,7 @@ export function LogList({ rows, empty }: { rows: LogRow[]; empty: string }) {
             <span className="font-semibold text-slate-700">{fmtPlainDate(r.logDate)}</span>
             <span>{r.user}</span>
             <Badge tone="blue">{ACTIVITY_LABEL[r.type]}</Badge>
+            {r.system && <Badge>System</Badge>}
             {r.minutes ? <span>{fmtMinutes(r.minutes)}</span> : null}
           </div>
           <p className="mt-1 whitespace-pre-wrap text-slate-800">{r.description}</p>
