@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { ActionForm, SubmitButton, type ActionState } from "@/components/action-form";
+import { CheckboxList } from "@/components/checkbox-list";
 import { ClientNameField } from "@/components/client-name-field";
 import type { MeetingFormOptions } from "./form-options";
 
@@ -70,30 +71,6 @@ function L({ label, children, className = "" }: { label: string; children: React
       <span className="label">{label}</span>
       {children}
     </label>
-  );
-}
-
-function Checks({ name, items, selected, onChange }: { name: string; items: { id: number; label: string; hint?: string }[]; selected: number[]; onChange?: (ids: number[]) => void }) {
-  if (!items.length) return <div className="rounded-md border border-dashed border-slate-300 p-3 text-sm text-slate-500">None available.</div>;
-  return (
-    <div className="max-h-52 space-y-0.5 overflow-y-auto rounded-md border border-slate-300 bg-white p-2">
-      {items.map((o) => (
-        <label key={o.id} className="flex cursor-pointer items-start gap-2 rounded px-2 py-1 text-sm hover:bg-slate-50">
-          <input
-            type="checkbox"
-            name={name}
-            value={o.id}
-            checked={selected.includes(o.id)}
-            onChange={(e) => onChange?.(e.target.checked ? [...selected, o.id] : selected.filter((x) => x !== o.id))}
-            className="mt-0.5 accent-brand"
-          />
-          <span>
-            {o.label}
-            {o.hint && <span className="block text-xs text-slate-500">{o.hint}</span>}
-          </span>
-        </label>
-      ))}
-    </div>
   );
 }
 
@@ -232,11 +209,12 @@ export function MeetingForm({
       <div className="grid gap-5 lg:grid-cols-2">
         <Box title="Client attendees">
           {client ? (
-            <Checks
+            <CheckboxList
               name="contactIds"
-              items={client.contacts.map((c) => ({ id: c.id, label: c.name, hint: [c.designation, c.hasEmail ? null : "no email, won't get the invite"].filter(Boolean).join(" · ") || undefined }))}
+              options={client.contacts.map((c) => ({ id: c.id, label: c.name, hint: [c.designation, c.hasEmail ? null : "no email, won't get the invite"].filter(Boolean).join(" · ") || undefined }))}
               selected={contactIds}
               onChange={setContactIds}
+              empty="This client has no contacts yet."
             />
           ) : (
             <p className="text-sm text-slate-500">{clientId === "new" ? "Add contacts on the client page after saving." : "Pick a client to choose its contacts."}</p>
@@ -248,9 +226,9 @@ export function MeetingForm({
         </Box>
         <Box title="ERAM attendees" hint="Pick groups, people, or both. Group members are added as attendees.">
           <span className="label">Groups</span>
-          <Checks name="groupIds" items={options.groups.map((g) => ({ id: g.id, label: g.name }))} selected={groupIds} onChange={setGroupIds} />
+          <CheckboxList name="groupIds" options={options.groups.map((g) => ({ id: g.id, label: g.name }))} selected={groupIds} onChange={setGroupIds} />
           <span className="label mt-3">People</span>
-          <Checks name="userIds" items={options.users.map((u) => ({ id: u.id, label: u.fullName, hint: u.email }))} selected={userIds} onChange={setUserIds} />
+          <CheckboxList name="userIds" options={options.users.map((u) => ({ id: u.id, label: u.fullName, hint: u.email }))} selected={userIds} onChange={setUserIds} />
         </Box>
       </div>
 
@@ -261,7 +239,7 @@ export function MeetingForm({
           </L>
           <div>
             <span className="label">Relevant business units</span>
-            <Checks name="businessUnitIds" items={options.bus.map((b) => ({ id: b.id, label: b.name }))} selected={buIds} onChange={setBuIds} />
+            <CheckboxList name="businessUnitIds" options={options.bus.map((b) => ({ id: b.id, label: b.name }))} selected={buIds} onChange={setBuIds} />
           </div>
           <L label="Presentation / documents">
             <textarea name="documents" className="input" rows={2} value={documents} onChange={(e) => setDocuments(e.target.value)} placeholder="Separate items with ;" />
@@ -286,7 +264,7 @@ export function MeetingForm({
           </L>
           <div className="md:col-span-3">
             <span className="label">Action owner(s)</span>
-            <Checks name="ownerIds" items={options.users.map((u) => ({ id: u.id, label: u.fullName }))} selected={ownerIds} onChange={setOwnerIds} />
+            <CheckboxList name="ownerIds" options={options.users.map((u) => ({ id: u.id, label: u.fullName }))} selected={ownerIds} onChange={setOwnerIds} />
           </div>
           <L label="Notes" className="md:col-span-3">
             <textarea name="notes" className="input" rows={2} defaultValue={defaults.notes ?? ""} />
