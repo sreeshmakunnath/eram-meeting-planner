@@ -173,6 +173,11 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         subtitle={[labelize(client.type), [client.city, client.country].filter(Boolean).join(", "), client.industry].filter(Boolean).join(" · ")}
         actions={
           <>
+            {client.clientCode && (
+              <span className="rounded border border-slate-200 bg-slate-50 px-2 py-0.5 font-mono text-xs text-slate-700" title="Client code, for reports shared without client details">
+                {client.clientCode}
+              </span>
+            )}
             <Badge tone={statusTone(client.status)}>{labelize(client.status)}</Badge>
             <Link href={`/meetings/new?client=${id}`} className="btn-secondary">
               New meeting
@@ -217,6 +222,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         <section className="card p-4 text-sm lg:order-2">
           <dl className="space-y-3">
             {[
+              ["Client code", client.clientCode ?? "Given once the client has a business unit"],
               ["Short code", client.shortCode],
               ["BD stage", client.bdStage ? BD_STAGE_LABELS[client.bdStage] : null],
               ["Account owner", client.accountOwner?.fullName],

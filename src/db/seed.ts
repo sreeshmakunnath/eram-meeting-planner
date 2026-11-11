@@ -2,6 +2,7 @@
 // Run once against the production database:  npm run db:seed
 //   SUPER_ADMIN_1_NAME / _EMAIL / _USERNAME / _PASSWORD and SUPER_ADMIN_2_… (see .env.example).
 //   _USERNAME defaults to the part of the email before "@"; without _PASSWORD a random one is generated and printed.
+import { suggestBuCode } from "../lib/bu-code";
 import { randomBytes } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
@@ -41,7 +42,7 @@ async function main() {
   const db = drizzle(pool, { schema });
   try {
     await db.insert(schema.branches).values(branchNames.map((name) => ({ name }))).onConflictDoNothing();
-    await db.insert(schema.businessUnits).values(buNames.map((name) => ({ name }))).onConflictDoNothing();
+    await db.insert(schema.businessUnits).values(buNames.map((name) => ({ name, code: suggestBuCode(name) }))).onConflictDoNothing();
 
     const [hq] = await db.select().from(schema.branches).where(eq(schema.branches.name, branchNames[0]));
     const [bu] = await db.select().from(schema.businessUnits).where(eq(schema.businessUnits.name, buNames[0]));

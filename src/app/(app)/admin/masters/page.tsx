@@ -5,18 +5,24 @@ import { db, schema } from "@/db";
 import { addMaster, renameMaster, toggleMaster } from "@/lib/actions/masters";
 import { requireSuperAdmin } from "@/lib/auth";
 
-type Row = { id: number; name: string; active: boolean; users: number };
+type Row = { id: number; name: string; code?: string; active: boolean; users: number };
 
 function MasterCard({ kind, title, rows }: { kind: "branch" | "businessUnit"; title: string; rows: Row[] }) {
   return (
     <section className="card p-5">
       <h2 className="mb-1 text-lg font-semibold text-navy">{title}</h2>
-      <p className="mb-4 text-sm text-slate-500">Inactive entries are hidden from dropdowns but kept on existing records.</p>
+      <p className="mb-4 text-sm text-slate-500">
+        Inactive entries are hidden from dropdowns but kept on existing records.
+        {kind === "businessUnit" && " The code (2–6 letters, e.g. ENG) starts every client code, such as CL-ENG-0007. Changing it doesn't change codes already given."}
+      </p>
       <ul className="mb-4 divide-y divide-slate-100">
         {rows.map((r) => (
           <li key={r.id} className="flex flex-wrap items-center gap-2 py-2">
             <ActionForm action={renameMaster.bind(null, kind, r.id)} className="flex flex-1 items-center gap-2">
               <input name="name" defaultValue={r.name} className="input" maxLength={100} />
+              {kind === "businessUnit" && (
+                <input name="code" defaultValue={r.code} className="input w-24 font-mono uppercase" maxLength={6} required aria-label="Code" title="Code used in client codes, e.g. ENG" />
+              )}
               <SubmitButton variant="secondary">Save</SubmitButton>
             </ActionForm>
             <span className="text-xs text-slate-500">{r.users} users</span>
@@ -29,6 +35,7 @@ function MasterCard({ kind, title, rows }: { kind: "branch" | "businessUnit"; ti
       </ul>
       <ActionForm action={addMaster.bind(null, kind)} className="flex gap-2">
         <input name="name" placeholder={`New ${kind === "branch" ? "branch" : "business unit"}`} className="input" maxLength={100} required />
+        {kind === "businessUnit" && <input name="code" placeholder="Code" className="input w-24 font-mono uppercase" maxLength={6} required aria-label="Code" />}
         <SubmitButton>Add</SubmitButton>
       </ActionForm>
     </section>
@@ -51,6 +58,7 @@ export default async function MastersPage() {
       .select({
         id: schema.businessUnits.id,
         name: schema.businessUnits.name,
+        code: schema.businessUnits.code,
         active: schema.businessUnits.active,
         users: sql<number>`(select count(*) from user_business_units ub where ub.business_unit_id = ${schema.businessUnits.id})`.mapWith(Number),
       })

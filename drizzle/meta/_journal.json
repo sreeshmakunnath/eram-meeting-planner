@@ -127,6 +127,13 @@
       "when": 1794319457791,
       "tag": "0017_vendor_registration",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1794389923788,
+      "tag": "0018_client_codes",
+      "breakpoints": true
     }
   ]
 }

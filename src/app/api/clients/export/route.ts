@@ -18,6 +18,7 @@ export async function GET(req: Request) {
   const { clients, users } = schema;
   const rows = await db
     .select({
+      clientCode: clients.clientCode,
       name: clients.name,
       shortCode: clients.shortCode,
       type: clients.type,
@@ -33,9 +34,9 @@ export async function GET(req: Request) {
     .leftJoin(users, eq(clients.accountOwnerId, users.id))
     .where(and(clientVisibleTo(session.user), status === "ALL" ? undefined : eq(clients.status, status as "ACTIVE" | "INACTIVE" | "PENDING_REVIEW")))
     .orderBy(asc(clients.name));
-  const header = ["Client", "Short code", "Type", "Industry", "Country", "City", "Website", "BD stage", "Status", "Account owner"];
+  const header = ["Client code", "Client", "Short code", "Type", "Industry", "Country", "City", "Website", "BD stage", "Status", "Account owner"];
   const lines = rows.map((r) =>
-    [r.name, r.shortCode, r.type, r.industry, r.country, r.city, r.website, r.bdStage ? BD_STAGE_LABELS[r.bdStage] : "", r.status, r.owner]
+    [r.clientCode, r.name, r.shortCode, r.type, r.industry, r.country, r.city, r.website, r.bdStage ? BD_STAGE_LABELS[r.bdStage] : "", r.status, r.owner]
       .map(cell)
       .join(","),
   );

@@ -18,7 +18,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
   if (searchParams.bu) where.push(sql`exists (select 1 from client_business_units cb where cb.client_id = ${clients.id} and cb.business_unit_id = ${Number(searchParams.bu)})`);
   if (searchParams.q) {
     const q = `%${searchParams.q}%`;
-    where.push(or(ilike(clients.name, q), ilike(clients.shortCode, q), ilike(clients.city, q))!);
+    where.push(or(ilike(clients.name, q), ilike(clients.shortCode, q), ilike(clients.clientCode, q), ilike(clients.city, q))!);
   }
   if (searchParams.type && (CLIENT_TYPES as readonly string[]).includes(searchParams.type))
     where.push(eq(clients.type, searchParams.type as (typeof CLIENT_TYPES)[number]));
@@ -35,6 +35,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
         id: clients.id,
         name: clients.name,
         shortCode: clients.shortCode,
+        clientCode: clients.clientCode,
         type: clients.type,
         country: clients.country,
         city: clients.city,
@@ -151,6 +152,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
           <table className="table">
             <thead>
               <tr>
+                <th>Code</th>
                 <th>Client</th>
                 <th>Type</th>
                 <th>Business units</th>
@@ -164,6 +166,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
             <tbody className="divide-y divide-slate-100">
               {rows.map((c) => (
                 <tr key={c.id} className="hover:bg-slate-50">
+                  <td className="whitespace-nowrap font-mono text-xs text-slate-600">{c.clientCode ?? "—"}</td>
                   <td>
                     <Link href={`/clients/${c.id}`} className="link">
                       {c.name}

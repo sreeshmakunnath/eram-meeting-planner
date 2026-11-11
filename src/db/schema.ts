@@ -45,6 +45,8 @@ export const branches = pgTable("branches", {
 export const businessUnits = pgTable("business_units", {
   id: serial("id").primaryKey(),
   name: varchar("name", { length: 100 }).notNull().unique(),
+  /** Short code (e.g. ENG) used in client codes; set by the Super Admin. */
+  code: varchar("code", { length: 6 }).notNull().unique(),
   active: boolean("active").default(true).notNull(),
   createdAt: createdAt(),
 });
@@ -142,6 +144,12 @@ export const clients = pgTable(
     id: serial("id").primaryKey(),
     name: varchar("name", { length: 150 }).notNull().unique(),
     shortCode: varchar("short_code", { length: 10 }),
+    /**
+     * System code such as CL-ENG-0007, for reports shared without client details. Assigned by a database
+     * trigger when the client gets its first business unit (that unit's code + one company-wide running
+     * number) and never changed afterwards. Null only while a client has no business unit.
+     */
+    clientCode: varchar("client_code", { length: 20 }).unique(),
     type: clientTypeEnum("type").default("PROSPECT").notNull(),
     industry: varchar("industry", { length: 100 }),
     country: varchar("country", { length: 100 }).notNull(),
