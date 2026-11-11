@@ -20,6 +20,7 @@ const KIND: Record<string, { label: string; dot: string }> = {
   GROUP_ADDED: { label: "Group", dot: "bg-slate-500" },
   CLIENT_PENDING: { label: "Client to review", dot: "bg-amber-500" },
   CLIENT_REVIEWED: { label: "Client", dot: "bg-amber-500" },
+  VENDOR_REG_ASSIGNED: { label: "Vendor registration", dot: "bg-navy" },
 };
 
 export default async function NotificationsPage() {

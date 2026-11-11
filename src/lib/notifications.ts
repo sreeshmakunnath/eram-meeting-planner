@@ -14,7 +14,8 @@ export type NotificationKind =
   | "GROUP_ADDED"
   | "CONTACT_SHARED"
   | "CLIENT_PENDING"
-  | "CLIENT_REVIEWED";
+  | "CLIENT_REVIEWED"
+  | "VENDOR_REG_ASSIGNED";
 
 /**
  * Saves an in-app notification for each user (the person who caused it is left out).

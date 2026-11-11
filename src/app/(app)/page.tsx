@@ -13,11 +13,13 @@ import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { LogForm } from "./log/log-form";
 import { logFormOptions } from "./log/options";
-import { BuTable, KpiTile, MonthColumns, OrderedBars, StackedShare } from "@/components/dashboard-charts";
+import { BuTable, Donut, KpiTile, MonthColumns, OrderedBars, StackedShare } from "@/components/dashboard-charts";
+import { vendorRegCounts, vendorRegsPendingWith } from "@/lib/vendor-reg-stats";
+import { VENDOR_REG_LABEL } from "@/lib/vendor-reg";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
 import { orgStats } from "@/lib/org-stats";
 import { clientsToApprove } from "@/lib/client-approval";
-import { fmtDay, fmtTime, involves, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
+import { fmtDay, fmtPlainDate, fmtTime, involves, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
 
 function Tile({ label, value, href }: { label: string; value: number | string; href?: string }) {
   const body = (
@@ -64,7 +66,7 @@ async function MyWork({ me }: { me: SessionUser }) {
   const weekStart = riyadh(new Date(Date.parse(`${today}T00:00:00Z`) - dow * 86400_000).toISOString().slice(0, 10), "00:00");
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
   const now = new Date();
-  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions, toApprove] = await Promise.all([
+  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions, toApprove, vendorPending] = await Promise.all([
     db
       .select({ id: schema.groups.id, name: schema.groups.name })
       .from(schema.groupMembers)
@@ -104,6 +106,7 @@ async function MyWork({ me }: { me: SessionUser }) {
     listTasks(me, { scope: "watching", bucket: "open" }, 1000),
     logFormOptions(me),
     clientsToApprove(me),
+    vendorRegsPendingWith(me.id),
   ]);
   const myOverdue = myOpen.filter((t) => t.overdue);
   const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
@@ -139,6 +142,35 @@ async function MyWork({ me }: { me: SessionUser }) {
                 </Link>
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+      {vendorPending.length > 0 && (
+        <section className="card mb-4 px-4 py-3">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <h3 className="font-semibold text-navy">
+              Vendor registrations pending with me <span className="ml-1 rounded-full bg-brand-50 px-2 py-0.5 text-xs">{vendorPending.length}</span>
+            </h3>
+            <Link href="/reports/vendor-registrations?scope=mine&status=OPEN" className="link text-sm">
+              All mine →
+            </Link>
+          </div>
+          {/* One row of cards; more scroll sideways instead of making the page longer. */}
+          <ul className="flex gap-2 overflow-x-auto pb-1">
+            {vendorPending.map((v) => {
+              const late = !!v.dueDate && v.dueDate < today;
+              return (
+                <li key={v.id} className="shrink-0">
+                  <Link href={`/clients/${v.clientId}?tab=vendor`} className="block w-56 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm hover:border-brand/40">
+                    <div className="truncate font-medium text-navy">{v.client}</div>
+                    <div className="truncate text-xs text-slate-500">
+                      {VENDOR_REG_LABEL[v.status]}
+                      {v.dueDate && <span className={late ? "font-semibold text-red-600" : ""}> · due {fmtPlainDate(v.dueDate)}</span>}
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
           </ul>
         </section>
       )}
@@ -281,7 +313,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
   const unit = scoped ? units.find((u) => u.id === scoped.buIds[0]) : undefined;
   const q = (path: string) => (scoped ? `${path}${path.includes("?") ? "&" : "?"}bu=${scoped.buIds[0]}` : path);
 
-  const [stages, org, [monthCount], [tbs], statusRows, tasks, upcoming, activity] = await Promise.all([
+  const [stages, org, [monthCount], [tbs], statusRows, tasks, upcoming, activity, vendor] = await Promise.all([
     db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(viewer))).groupBy(schema.clients.bdStage),
     orgStats(viewer),
     db
@@ -293,6 +325,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
     taskStats(viewer, scoped?.buIds[0]), // same BU rule as the linked task lists
     meetingsBetween(viewer, now, new Date(now.getTime() + 7 * 86400_000), notInArray(m.status, ["CANCELLED", "POSTPONED"])),
     recentActivity(viewer, 15),
+    vendorRegCounts(viewer),
   ]);
   const stageCount = (s: string) => stages.find((x) => x.stage === s)?.n ?? 0;
   const flagCount = (f: Flag) => statusRows.filter((r) => r.flag === f).length;
@@ -319,7 +352,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
           <noscript>
             <button className="btn-secondary">Show</button>
           </noscript>
-          {unit && <span className="text-sm text-slate-500">Clients, meetings and tasks of {unit.name} only.</span>}
+          {unit && <span className="text-sm text-slate-500">Clients, meetings, tasks and vendor registrations of {unit.name} only.</span>}
         </form>
       )}
 
@@ -414,7 +447,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
             ))}
           </div>
         </section>
-        <section className="card p-4 lg:col-span-8 xl:col-span-9">
+        <section className="card p-4 lg:col-span-8 xl:col-span-5">
           <div className="mb-2 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">Tasks by assignee</h3>
             <span className="text-xs text-slate-500">Click a number for the list · a task with several people counts for each</span>
@@ -458,6 +491,22 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
                 </tbody>
               </table>
             </div>
+          )}
+        </section>
+        <section className="card p-4 lg:col-span-12 xl:col-span-4">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Vendor registrations</h3>
+            <Link href={q("/reports/vendor-registrations")} className="link text-xs">
+              Full report →
+            </Link>
+          </div>
+          {vendor.total === 0 ? (
+            <p className="text-sm text-slate-500">No vendor registrations{unit ? ` in ${unit.name}` : ""} yet.</p>
+          ) : (
+            <Donut
+              total={vendor.total}
+              items={vendor.stages.map((g) => ({ key: g.key, label: g.label, n: g.n, color: g.color, href: q(`/reports/vendor-registrations?stage=${g.key}`) }))}
+            />
           )}
         </section>
       </div>

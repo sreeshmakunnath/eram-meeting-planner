@@ -42,6 +42,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
     { href: "/reports/client-status", label: "Client status" },
     { href: "/reports/target-schedule", label: "BD tracker" },
     { href: "/reports/tasks", label: "Task report" },
+    { href: "/reports/vendor-registrations", label: "Vendor registrations" },
   ];
   const admin: Item[] = [
     { href: "/admin/users", label: "Users" },

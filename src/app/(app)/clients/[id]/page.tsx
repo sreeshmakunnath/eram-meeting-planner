@@ -19,6 +19,7 @@ import { LogForm } from "../../log/log-form";
 import { LogList } from "../../log/log-list";
 import { logFormOptions } from "../../log/options";
 import { SharingFields } from "./sharing-fields";
+import { VendorRegistrations, type VendorReg } from "./vendor-registrations";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Client saved." },
@@ -38,6 +39,44 @@ function ApprovalNote({ details }: { details: unknown }) {
       {d.remarks && <div className="mt-1 rounded border-l-2 border-emerald-300 bg-emerald-50/50 px-2 py-1 text-sm text-slate-700">{d.remarks}</div>}
     </div>
   );
+}
+
+/** A client's vendor registrations with their documents; the password itself never leaves the server here. */
+async function loadVendorRegs(clientId: number, meId: number, manage: boolean): Promise<VendorReg[]> {
+  const vr = schema.vendorRegistrations;
+  const regs = await db
+    .select({ reg: vr, assignee: schema.users.fullName })
+    .from(vr)
+    .leftJoin(schema.users, eq(vr.assigneeId, schema.users.id))
+    .where(eq(vr.clientId, clientId))
+    .orderBy(asc(vr.createdAt));
+  const docs = regs.length
+    ? await db
+        .select({ doc: schema.vendorRegDocuments, addedBy: schema.users.fullName })
+        .from(schema.vendorRegDocuments)
+        .leftJoin(schema.users, eq(schema.vendorRegDocuments.addedById, schema.users.id))
+        .where(inArray(schema.vendorRegDocuments.registrationId, regs.map((r) => r.reg.id)))
+        .orderBy(asc(schema.vendorRegDocuments.createdAt))
+    : [];
+  return regs.map(({ reg: r, assignee }) => ({
+    id: r.id,
+    title: r.title,
+    status: r.status,
+    assigneeId: r.assigneeId,
+    assignee,
+    dueDate: r.dueDate,
+    portalUrl: r.portalUrl,
+    portalUsername: r.portalUsername,
+    hasPassword: !!r.portalPasswordEnc,
+    vendorCode: r.vendorCode,
+    notes: r.notes,
+    completedAt: r.completedAt?.toISOString() ?? null,
+    updatedAt: r.updatedAt.toISOString(),
+    canWork: manage || r.assigneeId === meId,
+    documents: docs
+      .filter((d) => d.doc.registrationId === r.id)
+      .map((d) => ({ id: d.doc.id, name: d.doc.name, url: d.doc.url, addedBy: d.addedBy, createdAt: d.doc.createdAt.toISOString() })),
+  }));
 }
 
 export default async function ClientPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; msg?: string }> }) {
@@ -85,7 +124,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         .orderBy(asc(schema.users.fullName))
     : [];
   const sharedWith = (contactId: number) => shares.filter((s) => s.contactId === contactId);
-  const viewers = (searchParams.tab ?? "contacts") === "contacts" ? await usersWhoCanSeeClient(id) : [];
+  const viewers = ["contacts", "vendor"].includes(searchParams.tab ?? "contacts") ? await usersWhoCanSeeClient(id) : [];
   // Super Admins: deleted contacts, to restore
   const deletedBy = alias(schema.users, "deleted_by");
   const deletedContacts =
@@ -113,6 +152,8 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
   const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
   const clientTasks = tab === "tasks" ? await listTasks(me, { scope: "all", bucket: "any", client: String(id) }) : [];
   const [clientLogs, logOptions] = tab === "log" ? await Promise.all([logsFor(me, { clientId: id }), logFormOptions(me)]) : [[], null];
+  const vendorRegs: VendorReg[] = tab === "vendor" ? await loadVendorRegs(id, me.id, editable) : [];
+  const vendorCount = await db.$count(schema.vendorRegistrations, eq(schema.vendorRegistrations.clientId, id));
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
   const activity =
     tab === "activity"
@@ -226,6 +267,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               { href: `${base}?tab=contacts`, label: `Contacts (${contacts.length})` },
               { href: `${base}?tab=meetings`, label: "Meetings" },
               { href: `${base}?tab=tasks`, label: "Tasks" },
+              { href: `${base}?tab=vendor`, label: vendorCount ? `Vendor registration (${vendorCount})` : "Vendor registration" },
               { href: `${base}?tab=log`, label: "Daily log" },
               { href: `${base}?tab=activity`, label: "Activity" },
             ]}
@@ -427,6 +469,8 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               />
             </div>
           )}
+
+          {tab === "vendor" && <VendorRegistrations clientId={id} regs={vendorRegs} manage={editable} people={viewers} />}
 
           {tab === "log" && (
             <div className="card">

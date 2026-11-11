@@ -755,3 +755,64 @@ export const dailyLogsRelations = relations(dailyLogs, ({ one }) => ({
   meeting: one(meetings, { fields: [dailyLogs.meetingId], references: [meetings.id] }),
   businessUnit: one(businessUnits, { fields: [dailyLogs.businessUnitId], references: [businessUnits.id] }),
 }));
+
+// =====================================================================
+// Vendor registration — getting ERAM registered as a supplier with a client (often on the client's portal)
+// =====================================================================
+export const vendorRegStatusEnum = pgEnum("vendor_reg_status", [
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "MAILED",
+  "ON_HOLD",
+  "SUBMITTED",
+  "PORTAL_CREATED",
+  "COMPLETED",
+]);
+
+/**
+ * One registration with a client (a client can have more than one, e.g. separate portals or entities).
+ * The portal password is stored encrypted (AES-256-GCM, key in CREDENTIALS_KEY) and only shown on request.
+ */
+export const vendorRegistrations = pgTable(
+  "vendor_registrations",
+  {
+    id: serial("id").primaryKey(),
+    clientId: integer("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 150 }).default("Vendor registration").notNull(),
+    assigneeId: integer("assignee_id").references(() => users.id, { onDelete: "set null" }),
+    status: vendorRegStatusEnum("status").default("NOT_STARTED").notNull(),
+    dueDate: date("due_date", { mode: "string" }),
+    portalUrl: varchar("portal_url", { length: 500 }),
+    portalUsername: varchar("portal_username", { length: 200 }),
+    /** "iv.tag.ciphertext" in base64; never sent to the browser unless someone asks to see it. */
+    portalPasswordEnc: text("portal_password_enc"),
+    /** Vendor / supplier number the client gives once registered. */
+    vendorCode: varchar("vendor_code", { length: 100 }),
+    notes: text("notes"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index("vendor_reg_client_idx").on(t.clientId), index("vendor_reg_assignee_idx").on(t.assigneeId, t.status)],
+);
+
+/** Documents for a registration: a name and a link (SharePoint for now; S3 later via storage_key). */
+export const vendorRegDocuments = pgTable(
+  "vendor_reg_documents",
+  {
+    id: serial("id").primaryKey(),
+    registrationId: integer("registration_id")
+      .notNull()
+      .references(() => vendorRegistrations.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    url: varchar("url", { length: 1000 }),
+    /** Reserved for the move to S3: the object key, when the file is stored there instead of linked. */
+    storageKey: varchar("storage_key", { length: 500 }),
+    addedById: integer("added_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("vendor_reg_docs_reg_idx").on(t.registrationId)],
+);

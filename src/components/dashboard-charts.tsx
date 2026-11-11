@@ -198,3 +198,66 @@ export function BuTable({ rows }: { rows: { id: number | null; name: string; use
     </div>
   );
 }
+
+/**
+ * Part-to-whole donut for a handful of states (≤ 4 slices), total in the middle, legend beside it with every
+ * count and percentage, so nothing relies on colour or hover. Slices are separated by a 2px surface gap.
+ */
+export function Donut({ items, total, centerLabel = "total" }: { items: { key: string; label: string; n: number; color: string; href: string }[]; total: number; centerLabel?: string }) {
+  const R = 40; // radius of the ring's centre line, in a 100×100 viewBox
+  const C = 2 * Math.PI * R;
+  const shown = items.filter((i) => i.n > 0);
+  const gap = shown.length > 1 ? 1.2 : 0; // ≈2px at the rendered size
+  let offset = 0;
+  return (
+    <div className="flex items-center gap-4">
+      <svg viewBox="0 0 100 100" className="h-32 w-32 shrink-0 -rotate-90" role="img" aria-label={items.map((i) => `${i.label} ${i.n}`).join(", ")}>
+        <circle cx="50" cy="50" r={R} fill="none" stroke="#f1f5f9" strokeWidth="14" />
+        {shown.map((i) => {
+          const len = (i.n / Math.max(1, total)) * C;
+          const el = (
+            <a key={i.key} href={i.href}>
+              <circle
+                cx="50"
+                cy="50"
+                r={R}
+                fill="none"
+                stroke={i.color}
+                strokeWidth="14"
+                strokeDasharray={`${Math.max(0.01, len - gap)} ${C}`}
+                strokeDashoffset={-offset}
+                className="transition-opacity hover:opacity-80"
+              >
+                <title>
+                  {i.label}: {i.n} ({Math.round((i.n / Math.max(1, total)) * 100)}%)
+                </title>
+              </circle>
+            </a>
+          );
+          offset += len;
+          return el;
+        })}
+        <g className="rotate-90" style={{ transformOrigin: "50px 50px" }}>
+          <text x="50" y="50" textAnchor="middle" className="fill-navy text-[20px] font-bold">
+            {total}
+          </text>
+          <text x="50" y="63" textAnchor="middle" className="fill-slate-500 text-[9px]">
+            {centerLabel}
+          </text>
+        </g>
+      </svg>
+      <ul className="min-w-0 flex-1 divide-y divide-slate-100 text-sm">
+        {items.map((i) => (
+          <li key={i.key}>
+            <Link href={i.href} className="flex items-center gap-2 py-1.5 hover:bg-slate-50">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: i.color }} aria-hidden />
+              <span className="flex-1 truncate text-slate-700">{i.label}</span>
+              <span className="w-8 text-right font-semibold tabular-nums text-navy">{i.n}</span>
+              <span className="w-9 text-right text-xs tabular-nums text-slate-400">{total ? Math.round((i.n / total) * 100) : 0}%</span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
