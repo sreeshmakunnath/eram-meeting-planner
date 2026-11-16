@@ -34,7 +34,7 @@ export default async function ClientImportPage() {
         </ol>
         <p>
           <b>Client</b> and <b>Country</b> are required for new clients. Clients that already exist (same name) are updated: filled-in cells overwrite, empty cells keep the current
-          value, and contacts and business units are only added. Names close to an existing client, like &quot;Sabbic&quot; and SABIC, are held back as possible duplicates. No
+          value, and contacts are only added. A new client goes in the business unit on its row (an existing client stays in its unit). Names close to an existing client, like &quot;Sabbic&quot; and SABIC, are held back as possible duplicates. No
           emails are sent.
         </p>
       </div>

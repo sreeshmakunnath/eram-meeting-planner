@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PdfButton } from "@/components/pdf-export";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { Badge, Empty, labelize, PageHeader } from "@/components/ui";
 import { updateBdStage } from "@/lib/actions/clients";
@@ -43,9 +44,12 @@ export default async function ClientStatusPage(props: { searchParams: Promise<Se
         title="Client status"
         subtitle={`Where every client stands — ${all.length} clients${me.role === "SUPER_ADMIN" ? "" : ", based on meetings you can see"}.`}
         actions={
-          <a href={`/api/reports/client-status?${qs}`} className="btn-secondary">
-            Export Excel
-          </a>
+          <>
+            <a href={`/api/reports/client-status?${qs}`} className="btn-secondary">
+              Export Excel
+            </a>
+            <PdfButton title="Client status" />
+          </>
         }
       />
       <div className="mb-5 grid gap-3 sm:grid-cols-3 lg:grid-cols-5">{FLAG_ORDER.map(tile)}</div>

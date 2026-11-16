@@ -134,6 +134,62 @@
       "when": 1794389923788,
       "tag": "0018_client_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1794398716278,
+      "tag": "0019_bids",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1794400186925,
+      "tag": "0020_bid_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1794401655007,
+      "tag": "0021_bid_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1794404039667,
+      "tag": "0022_client_projects",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1794405133109,
+      "tag": "0023_bid_issue_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1794406904070,
+      "tag": "0024_bid_decision_band",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1794469004618,
+      "tag": "0025_client_primary_bu",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794807883582,
+      "tag": "0026_bid_team",
+      "breakpoints": true
     }
   ]
 }

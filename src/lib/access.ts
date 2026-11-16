@@ -1,20 +1,18 @@
-// Business-unit access rules. Super Admins see everything; everyone else sees clients (and through them
-// meetings) of the business units they're assigned to, plus clients they own or created.
-import { and, eq, exists, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+// Business-unit access rules. Every client belongs to one business unit. Super Admins see everything; everyone
+// else sees clients (and through them meetings) of the business units they're assigned to, plus clients they
+// own or created.
+import { and, eq, exists, inArray, isNull, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 
 const one = { one: sql`1` };
 
-/** The client is tagged with at least one of the user's business units. */
+/** The client (by id column) belongs to one of the user's business units. */
 export const clientInMyBus = (me: SessionUser, clientId: AnyPgColumn) =>
-  exists(
-    db
-      .select(one)
-      .from(schema.clientBusinessUnits)
-      .where(and(eq(schema.clientBusinessUnits.clientId, clientId), inArray(schema.clientBusinessUnits.businessUnitId, me.buIds))),
-  );
+  me.buIds.length
+    ? exists(db.select(one).from(schema.clients).where(and(eq(schema.clients.id, clientId), inArray(schema.clients.businessUnitId, me.buIds))))
+    : sql`false`;
 
 /** The user (by id column) shares at least one business unit with me. */
 export const userInMyBus = (me: SessionUser, userId: AnyPgColumn) =>
@@ -121,8 +119,8 @@ export async function usersWhoCanSeeClient(clientId: number) {
     select u.id, u.full_name from users u, c
     where u.status = 'ACTIVE' and (
       u.role = 'SUPER_ADMIN' or u.id = c.account_owner_id or u.id = c.created_by_id or u.id in (select id from up)
-      or exists (select 1 from user_business_units ub join client_business_units cb on cb.business_unit_id = ub.business_unit_id
-                 where ub.user_id = u.id and cb.client_id = ${clientId})
+      or exists (select 1 from user_business_units ub join clients cl on cl.business_unit_id = ub.business_unit_id
+                 where ub.user_id = u.id and cl.id = ${clientId})
     )
     order by u.full_name`);
   return res.rows.map((r) => ({ id: Number(r.id), fullName: r.full_name }));
@@ -137,14 +135,35 @@ export async function canManageContact(me: SessionUser, contact: { ownerId: numb
   return contact.shared && canManageClient(me, client);
 }
 
-/** Manage a user account: Super Admins manage everyone; BU Admins manage non-Super users who share one of their units. */
+/**
+ * The user (by id column) belongs only to my business units: at least one of them, and none outside. A user who
+ * also has access to another unit is managed by a Super Admin, so an Admin can never reach another unit's bids
+ * through them (by making them Admin, their manager, or signing in as them with a new password or email).
+ */
+export const userWithinMyBus = (me: SessionUser, userId: AnyPgColumn) =>
+  and(
+    userInMyBus(me, userId),
+    not(
+      exists(
+        db
+          .select(one)
+          .from(schema.userBusinessUnits)
+          .where(and(eq(schema.userBusinessUnits.userId, userId), notInArray(schema.userBusinessUnits.businessUnitId, me.buIds.length ? me.buIds : [0]))),
+      ),
+    ),
+  )!;
+
+/**
+ * Manage a user account (details, role, managers, units, password, status, bids hand-over): Super Admins manage
+ * everyone; BU Admins manage non-Super users who belong only to the Admin's own units.
+ */
 export async function canManageUser(me: SessionUser, userId: number) {
   if (isSuperAdmin(me)) return true;
-  if (!isAdmin(me)) return false;
+  if (!isAdmin(me) || !me.buIds.length) return false;
   const [row] = await db
     .select({ id: schema.users.id })
     .from(schema.users)
-    .where(and(eq(schema.users.id, userId), ne(schema.users.role, "SUPER_ADMIN"), userInMyBus(me, schema.users.id)));
+    .where(and(eq(schema.users.id, userId), ne(schema.users.role, "SUPER_ADMIN"), userWithinMyBus(me, schema.users.id)));
   return !!row;
 }
 
@@ -183,4 +202,70 @@ export function mergeBuIds(me: SessionUser, picked: number[], existing: number[]
   const ids = [...new Set([...mine, ...kept])];
   const error = mine.length ? null : `Select at least one ${isSuperAdmin(me) ? "" : "of your "}business unit${isSuperAdmin(me) ? "" : "s"} for this ${what}.`;
   return { error, ids };
+}
+
+/**
+ * Bids are ERAM's most confidential records. Apart from Super Admins, a bid is seen ONLY by:
+ *  - its current owner, while they are a member of the bid's business unit (the creator has no access of
+ *    their own: once a bid is handed to someone else, the creator loses it);
+ *  - its bid team (people working on it with the owner), while they are members of the bid's unit;
+ *  - everyone above the owner in the reporting lines, at any depth (not the team members' managers);
+ *  - the client's account owner, if the client has one (view only);
+ *  - Admins of the client's business unit (a bid is always in its client's unit).
+ * Nobody else: no tagging, sharing or access through other units, the client page or meetings. Every bid
+ * query, page, export, aggregate and action goes through bidVisibleTo / canSeeBid / canEditBid / canControlBid.
+ */
+export function bidVisibleTo(me: SessionUser): SQL | undefined {
+  if (isSuperAdmin(me)) return undefined;
+  const b = schema.bids;
+  return or(
+    me.buIds.length ? and(eq(b.ownerId, me.id), inArray(b.businessUnitId, me.buIds)) : undefined,
+    me.buIds.length ? and(inArray(b.businessUnitId, me.buIds), onBidTeam(me.id)) : undefined,
+    sql`${b.ownerId} in ${teamOf(me.id)}`,
+    exists(db.select(one).from(schema.clients).where(and(eq(schema.clients.id, b.clientId), eq(schema.clients.accountOwnerId, me.id)))),
+    isAdmin(me) && me.buIds.length ? inArray(b.businessUnitId, me.buIds) : undefined,
+  )!;
+}
+
+/** The user is on the bid's team (correlated with the bids row in the query). */
+const onBidTeam = (userId: number) =>
+  exists(db.select(one).from(schema.bidTeam).where(and(eq(schema.bidTeam.bidId, schema.bids.id), eq(schema.bidTeam.userId, userId))));
+
+export async function canSeeBid(me: SessionUser, bidId: number) {
+  const [row] = await db.select({ id: schema.bids.id }).from(schema.bids).where(and(eq(schema.bids.id, bidId), bidVisibleTo(me)));
+  return !!row;
+}
+
+type BidRef = { id: number; businessUnitId: number; ownerId: number | null };
+
+/**
+ * The owner side of a bid: edit it, transfer it, delete it and manage its team. Super Admin, the owner (while in
+ * the bid's unit), the owner's managers at any level, or an Admin of the bid's unit.
+ */
+export async function canControlBid(me: SessionUser, bid: BidRef) {
+  if (isSuperAdmin(me)) return true;
+  const inUnit = me.buIds.includes(bid.businessUnitId);
+  if (inUnit && (isAdmin(me) || bid.ownerId === me.id)) return true;
+  return bid.ownerId != null && (await teamIds(me.id)).includes(bid.ownerId);
+}
+
+/** Edit a bid's details, items, documents and stage: the owner side, or a team member while in the bid's unit. */
+export async function canEditBid(me: SessionUser, bid: BidRef) {
+  if (await canControlBid(me, bid)) return true;
+  if (!me.buIds.includes(bid.businessUnitId)) return false;
+  const [row] = await db
+    .select({ id: schema.bidTeam.userId })
+    .from(schema.bidTeam)
+    .where(and(eq(schema.bidTeam.bidId, bid.id), eq(schema.bidTeam.userId, me.id)));
+  return !!row;
+}
+
+/** Active members of a business unit (e.g. who may own a client or a bid in it). */
+export async function isActiveMemberOf(userId: number, buId: number) {
+  const [m] = await db
+    .select({ id: schema.userBusinessUnits.userId })
+    .from(schema.userBusinessUnits)
+    .innerJoin(schema.users, eq(schema.users.id, schema.userBusinessUnits.userId))
+    .where(and(eq(schema.userBusinessUnits.userId, userId), eq(schema.userBusinessUnits.businessUnitId, buId), eq(schema.users.status, "ACTIVE")));
+  return !!m;
 }

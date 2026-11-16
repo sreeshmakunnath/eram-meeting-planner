@@ -261,3 +261,46 @@ export function Donut({ items, total, centerLabel = "total" }: { items: { key: s
     </div>
   );
 }
+
+/**
+ * Column chart for a money series (one bar per period), the value printed on each bar. `extra` columns
+ * (e.g. "Overdue", "Later") sit after the months in a muted colour, as they aren't part of the timeline.
+ */
+export function ValueColumns({
+  points,
+  extra = [],
+  format,
+  unit,
+}: {
+  points: { key: string; label: string; value: number; count: number }[];
+  extra?: { key: string; label: string; value: number; count: number }[];
+  format: (n: number) => string;
+  unit: string;
+}) {
+  const all = [...points.map((p) => ({ ...p, muted: false })), ...extra.map((p) => ({ ...p, muted: true }))];
+  const max = Math.max(1, ...all.map((p) => p.value));
+  return (
+    <div className="pt-5">
+      <div className="relative flex h-40 items-end gap-2 border-b border-slate-300">
+        {all.map((p) => (
+          <div key={p.key} tabIndex={0} className="group relative flex h-full flex-1 items-end justify-center outline-none focus-visible:bg-brand-50">
+            <Tip>
+              {p.label}: {format(p.value)} {unit} · {p.count} bid{p.count === 1 ? "" : "s"}
+            </Tip>
+            <div className="relative w-full max-w-[36px]" style={{ height: `${(p.value / max) * 100}%` }}>
+              {p.value > 0 && <span className="absolute bottom-full left-1/2 mb-0.5 -translate-x-1/2 whitespace-nowrap text-[11px] font-semibold text-slate-600">{format(p.value)}</span>}
+              <div className="h-full w-full rounded-t-[4px] transition-opacity group-hover:opacity-80" style={{ background: p.muted ? "#b8c4d4" : SERIES }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        {all.map((p) => (
+          <div key={p.key} className={`flex-1 pt-1.5 text-center text-[11px] ${p.muted ? "italic text-slate-400" : "text-slate-500"}`}>
+            {p.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

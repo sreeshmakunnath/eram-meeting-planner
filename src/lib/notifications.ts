@@ -15,7 +15,10 @@ export type NotificationKind =
   | "CONTACT_SHARED"
   | "CLIENT_PENDING"
   | "CLIENT_REVIEWED"
-  | "VENDOR_REG_ASSIGNED";
+  | "VENDOR_REG_ASSIGNED"
+  | "BID_ASSIGNED"
+  | "BIDS_TO_TRANSFER"
+  | "BID_TEAM";
 
 /**
  * Saves an in-app notification for each user (the person who caused it is left out).

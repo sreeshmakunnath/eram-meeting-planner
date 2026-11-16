@@ -31,11 +31,12 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
   const main: Item[] = [
     { href: "/", label: "Dashboard" },
     { href: "/notifications", label: "Notifications", badge: unread },
+    { href: "/clients", label: "Clients" },
+    { href: "/bids", label: "Bids" },
     { href: "/meetings", label: "Meetings" },
     { href: "/meetings/calendar", label: "Calendar" },
     { href: "/tasks", label: "Tasks" },
     { href: "/log", label: "Daily log" },
-    { href: "/clients", label: "Clients" },
     { href: "/groups", label: "Groups" },
   ];
   const reports: Item[] = [
@@ -43,6 +44,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
     { href: "/reports/target-schedule", label: "BD tracker" },
     { href: "/reports/tasks", label: "Task report" },
     { href: "/reports/vendor-registrations", label: "Vendor registrations" },
+    ...(role !== "USER" ? [{ href: "/bids/dashboard", label: "Bids dashboard" }] : []),
   ];
   const admin: Item[] = [
     { href: "/admin/users", label: "Users" },
@@ -55,7 +57,13 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
       : []),
   ];
   const isActive = (href: string) =>
-    href === "/" ? path === "/" : href === "/meetings" ? path.startsWith("/meetings") && !path.startsWith("/meetings/calendar") : path.startsWith(href);
+    href === "/"
+      ? path === "/"
+      : href === "/meetings"
+        ? path.startsWith("/meetings") && !path.startsWith("/meetings/calendar")
+        : href === "/bids"
+          ? path.startsWith("/bids") && !path.startsWith("/bids/dashboard")
+          : path.startsWith(href);
   const link = (i: Item) =>
     i.soon ? (
       <span key={i.href} className="flex items-center justify-between rounded-md px-3 py-2 text-sm text-white/40">
@@ -78,7 +86,7 @@ export function Sidebar({ name, role, unread: initialUnread = 0 }: { name: strin
     );
 
   return (
-    <aside className="flex w-full flex-col bg-navy text-white md:min-h-screen md:w-60 md:shrink-0">
+    <aside className="flex w-full flex-col bg-navy text-white md:min-h-screen md:w-60 md:shrink-0 print:hidden">
       <div className="flex items-center justify-between px-5 py-4 md:py-5">
         <div className="flex flex-col items-start gap-2">
           <Logo on="dark" className="h-11" />

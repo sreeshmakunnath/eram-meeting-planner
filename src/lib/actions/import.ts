@@ -76,10 +76,11 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
   }
   if (!ws || !col.client) return { error: 'No "Client / Company" column found. Use the Client Meeting Planner layout.' };
 
-  const [users, clients, bus] = await Promise.all([
+  const [users, clients, bus, [adminRow]] = await Promise.all([
     db.select({ id: schema.users.id, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
     db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode }).from(schema.clients),
     db.select().from(schema.businessUnits),
+    db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, admin.id)),
   ]);
   const unmatched = new Set<string>();
   const findUser = (name: string) => {
@@ -109,9 +110,12 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
     if (!client) {
       const loc = text(get(row, "location"));
       const parts = loc.split(",").map((x) => x.trim()).filter(Boolean);
+      // A new client goes in the first business unit named on the row, else the importer's primary unit
+      const rowBus = text(get(row, "bus")).toLowerCase();
+      const businessUnitId = bus.find((b) => rowBus.includes(b.name.toLowerCase()))?.id ?? adminRow.bu;
       const [c] = await db
         .insert(schema.clients)
-        .values({ name: clientName, country: parts.at(-1) || "Saudi Arabia", city: parts.length > 1 ? parts[0] : null, type: "PROSPECT", createdById: admin.id })
+        .values({ name: clientName, country: parts.at(-1) || "Saudi Arabia", city: parts.length > 1 ? parts[0] : null, businessUnitId, type: "PROSPECT", createdById: admin.id })
         .returning({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode });
       clients.push(c);
       client = c;

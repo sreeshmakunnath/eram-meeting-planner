@@ -1,4 +1,5 @@
 import { and, asc, eq, exists, inArray, sql, type SQL } from "drizzle-orm";
+import { PdfButton } from "@/components/pdf-export";
 import Link from "next/link";
 import { AutoSubmitSelect } from "@/components/auto-submit-select";
 import { Donut } from "@/components/dashboard-charts";
@@ -55,8 +56,8 @@ export default async function VendorRegistrationReport(props: { searchParams: Pr
       exists(
         db
           .select({ one: sql`1` })
-          .from(schema.clientBusinessUnits)
-          .where(and(eq(schema.clientBusinessUnits.clientId, vr.clientId), eq(schema.clientBusinessUnits.businessUnitId, bu.id))),
+          .from(schema.clients)
+          .where(and(eq(schema.clients.id, vr.clientId), eq(schema.clients.businessUnitId, bu.id))),
       ),
     );
   const rows = await db
@@ -95,15 +96,15 @@ export default async function VendorRegistrationReport(props: { searchParams: Pr
     return `/reports/vendor-registrations${s ? `?${s}` : ""}`;
   };
 
-  // Split by business unit (a client in two units counts in both), only when no unit is picked.
+  // Split by the clients' business units, only when no unit is picked.
   const byBu =
     !bu && units.length > 1 && rows.length
       ? await (async () => {
           const ids = [...new Set(rows.map((r) => r.clientId))];
           const links = await db
-            .select({ clientId: schema.clientBusinessUnits.clientId, buId: schema.clientBusinessUnits.businessUnitId })
-            .from(schema.clientBusinessUnits)
-            .where(inArray(schema.clientBusinessUnits.clientId, ids));
+            .select({ clientId: schema.clients.id, buId: schema.clients.businessUnitId })
+            .from(schema.clients)
+            .where(inArray(schema.clients.id, ids));
           const unitsOf = new Map<number, number[]>();
           for (const l of links) unitsOf.set(l.clientId, [...(unitsOf.get(l.clientId) ?? []), l.buId]);
           const blank = () => ({ total: 0, open: 0, hold: 0, completed: 0, overdue: 0 });
@@ -134,15 +135,18 @@ export default async function VendorRegistrationReport(props: { searchParams: Pr
         title="Vendor registrations"
         subtitle="Where ERAM stands as a registered vendor with each client"
         actions={
-          scopes.length > 1 && (
-            <div className="flex gap-1 rounded-md bg-slate-100 p-1 text-sm">
-              {scopes.map((s) => (
-                <Link key={s.key} href={href({ scope: s.key })} className={`rounded px-3 py-1 ${scope === s.key ? "bg-white shadow-sm" : "text-slate-600"}`}>
-                  {s.label}
-                </Link>
-              ))}
-            </div>
-          )
+          <>
+            {scopes.length > 1 && (
+              <div className="flex gap-1 rounded-md bg-slate-100 p-1 text-sm">
+                {scopes.map((s) => (
+                  <Link key={s.key} href={href({ scope: s.key })} className={`rounded px-3 py-1 ${scope === s.key ? "bg-white shadow-sm" : "text-slate-600"}`}>
+                    {s.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+            <PdfButton title="Vendor registrations" />
+          </>
         }
       />
 

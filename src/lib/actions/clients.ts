@@ -1,13 +1,13 @@
 "use server";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notifications";
-import { canApproveClient, canManageClient, canManageContact, canSeeClient, mergeBuIds, usersWhoCanSeeClient } from "@/lib/access";
-import { isAdmin, requireAdmin, requireSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
+import { canApproveClient, canManageClient, canManageContact, canSeeClient, isActiveMemberOf, usersWhoCanSeeClient } from "@/lib/access";
+import { isAdmin, isSuperAdmin, requireAdmin, requireSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { assertClientName, clientNameMatches, type ClientNameMatches } from "@/lib/client-names";
 import { BD_STAGES, CLIENT_STATUSES, CLIENT_TYPES } from "@/lib/queries";
@@ -36,14 +36,24 @@ function readClient(fd: FormData) {
   };
 }
 
-async function clientBuIds(clientId: number) {
-  const rows = await db.select().from(schema.clientBusinessUnits).where(eq(schema.clientBusinessUnits.clientId, clientId));
-  return rows.map((r) => r.businessUnitId);
+/**
+ * The account owner sees every bid of the client, so they must be an active member of the client's unit.
+ * Checked when the owner or the unit changes (an existing owner is left alone otherwise).
+ */
+async function checkAccountOwner(ownerId: number | null | undefined, buId: number) {
+  if (ownerId && !(await isActiveMemberOf(ownerId, buId))) throw new FormError("The account owner must be an active member of the client's business unit.");
 }
 
-async function setBusinessUnits(clientId: number, ids: number[]) {
-  await db.delete(schema.clientBusinessUnits).where(eq(schema.clientBusinessUnits.clientId, clientId));
-  if (ids.length) await db.insert(schema.clientBusinessUnits).values(ids.map((businessUnitId) => ({ clientId, businessUnitId })));
+/** The business unit picked on the form; it must be one of the person's own (any for a Super Admin). */
+async function pickedUnit(me: SessionUser, fd: FormData) {
+  const id = int(fd, "businessUnitId");
+  if (!id) throw new FormError("Select the client's business unit.");
+  const [bu] = await db
+    .select({ id: schema.businessUnits.id })
+    .from(schema.businessUnits)
+    .where(and(eq(schema.businessUnits.id, id), eq(schema.businessUnits.active, true)));
+  if (!bu || (!isSuperAdmin(me) && !me.buIds.includes(id))) throw new FormError("Select one of your business units.");
+  return id;
 }
 
 export async function saveClient(_: ActionState, fd: FormData): Promise<ActionState> {
@@ -60,26 +70,37 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       const [before] = await db.select().from(schema.clients).where(eq(schema.clients.id, id));
       if (!before) throw new FormError("Client not found.");
       // Anyone who can see the client fills in its details; the account owner (who sees private contacts) and
-      // the business units (who sees the client) stay with Admins and the owner.
+      // the business unit (who sees the client) stay with Admins and the owner.
       const full = await canManageClient(me, before);
       if (!full && !(await canSeeClient(me, id))) throw new FormError("You don't have access to this client.");
       if (!full) data.accountOwnerId = before.accountOwnerId;
-      const bus = full ? mergeBuIds(me, ints(fd, "businessUnitIds"), await clientBuIds(id), "client") : { error: null, ids: await clientBuIds(id) };
-      // A manager may share none of the client's units; the units already on it are then kept
-      if (bus.error && !(bus.ids.length && !isAdmin(me))) throw new FormError(bus.error);
+      // The unit can be changed only by someone who manages the client and is in its current unit (a manager
+      // outside the unit can't pull the client into theirs). The client's bids move with it.
+      const movable = full && (isSuperAdmin(me) || me.buIds.includes(before.businessUnitId));
+      const businessUnitId = movable ? await pickedUnit(me, fd) : before.businessUnitId;
+      const moved = businessUnitId !== before.businessUnitId;
+      if (moved || data.accountOwnerId !== before.accountOwnerId) await checkAccountOwner(data.accountOwnerId, businessUnitId);
       const status = isAdmin(me) && requested && CLIENT_STATUSES.includes(requested) ? requested : before.status;
-      const changed = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
-      await db.update(schema.clients).set({ ...data, status }).where(eq(schema.clients.id, id));
-      await setBusinessUnits(id, bus.ids);
-      await audit(me.id, "CLIENT_UPDATED", "client", id, { name: data.name, status, changed });
+      const changed: string[] = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
+      if (moved) changed.push("businessUnitId");
+      const clientId = id;
+      await db.transaction(async (tx) => {
+        await tx.update(schema.clients).set({ ...data, businessUnitId, status }).where(eq(schema.clients.id, clientId));
+        if (moved) await tx.update(schema.bids).set({ businessUnitId }).where(eq(schema.bids.clientId, clientId));
+      });
+      await audit(me.id, "CLIENT_UPDATED", "client", id, {
+        name: data.name,
+        status,
+        changed,
+        ...(moved ? { businessUnit: { from: before.businessUnitId, to: businessUnitId } } : {}),
+      });
     } else {
-      const bus = mergeBuIds(me, ints(fd, "businessUnitIds"), [], "client");
-      if (bus.error) throw new FormError(bus.error);
+      const businessUnitId = await pickedUnit(me, fd);
+      await checkAccountOwner(data.accountOwnerId, businessUnitId);
       // Users' new clients wait for Admin review so duplicates don't build up.
       const status = isAdmin(me) ? (requested && CLIENT_STATUSES.includes(requested) ? requested : "ACTIVE") : "PENDING_REVIEW";
-      const [c] = await db.insert(schema.clients).values({ ...data, status, createdById: me.id }).returning();
+      const [c] = await db.insert(schema.clients).values({ ...data, businessUnitId, status, createdById: me.id }).returning();
       id = c.id;
-      await setBusinessUnits(id, bus.ids);
       await audit(me.id, "CLIENT_CREATED", "client", id, { name: data.name, status });
       await systemLogClientAdded(id, me.id, data.name);
       if (status === "PENDING_REVIEW") await notifyClientPending(id, me);
@@ -117,8 +138,11 @@ export async function mergeClient(id: number, fd: FormData) {
   if (!from || !to) redirect(`/clients/${id}?msg=mergefail`);
   if (!(await canManageClient(admin, { id, accountOwnerId: null })) || !(await canManageClient(admin, { id: targetId, accountOwnerId: null })))
     redirect(`/clients/${id}?msg=denied`);
-  // The merged client keeps the business units of both.
-  await setBusinessUnits(targetId, [...new Set([...(await clientBuIds(targetId)), ...(await clientBuIds(id))])]);
+  // The merged client keeps its own business unit. A duplicate that already has bids or meetings isn't merged:
+  // bids would change unit (and audience) without anyone reviewing them, and deleting it would fail anyway.
+  const [hasBid] = await db.select({ id: schema.bids.id }).from(schema.bids).where(or(eq(schema.bids.clientId, id), eq(schema.bids.endClientId, id))).limit(1);
+  const [hasMeeting] = await db.select({ id: schema.meetings.id }).from(schema.meetings).where(eq(schema.meetings.clientId, id)).limit(1);
+  if (hasBid || hasMeeting) redirect(`/clients/${id}?msg=mergehas`);
   await db.update(schema.clientContacts).set({ clientId: targetId, isPrimary: false }).where(eq(schema.clientContacts.clientId, id));
   await db.delete(schema.clients).where(eq(schema.clients.id, id));
   await audit(admin.id, "CLIENT_MERGED", "client", targetId, { mergedFrom: id, mergedName: from.name });
@@ -152,6 +176,11 @@ export async function addContact(clientId: number, _: ActionState, fd: FormData)
 export async function setPrimaryContact(clientId: number, contactId: number) {
   const me = await requireUser();
   if (!(await canSeeClient(me, clientId))) redirect(`/clients?msg=denied`);
+  const [contact] = await db
+    .select({ id: schema.clientContacts.id })
+    .from(schema.clientContacts)
+    .where(and(eq(schema.clientContacts.id, contactId), eq(schema.clientContacts.clientId, clientId)));
+  if (!contact) redirect(`/clients/${clientId}?msg=denied`);
   await db.update(schema.clientContacts).set({ isPrimary: false }).where(eq(schema.clientContacts.clientId, clientId));
   await db.update(schema.clientContacts).set({ isPrimary: true }).where(eq(schema.clientContacts.id, contactId));
   await audit(me.id, "CONTACT_PRIMARY_SET", "client", clientId, { contactId });

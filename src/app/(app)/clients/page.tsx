@@ -15,7 +15,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
   const { clients, users } = schema;
   const visible = clientVisibleTo(me);
   const where: SQL[] = visible ? [visible] : [];
-  if (searchParams.bu) where.push(sql`exists (select 1 from client_business_units cb where cb.client_id = ${clients.id} and cb.business_unit_id = ${Number(searchParams.bu)})`);
+  if (searchParams.bu) where.push(eq(clients.businessUnitId, Number(searchParams.bu) || 0));
   if (searchParams.q) {
     const q = `%${searchParams.q}%`;
     where.push(or(ilike(clients.name, q), ilike(clients.shortCode, q), ilike(clients.clientCode, q), ilike(clients.city, q))!);
@@ -42,7 +42,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
         bdStage: clients.bdStage,
         status: clients.status,
         owner: users.fullName,
-        businessUnits: sql<string>`(select string_agg(b.name, ', ' order by b.name) from client_business_units cb join business_units b on b.id = cb.business_unit_id where cb.client_id = ${clients.id})`.mapWith(String),
+        businessUnits: sql<string>`(select b.name from business_units b where b.id = ${clients.businessUnitId})`.mapWith(String),
         contacts: sql<number>`(${db.select({ n: sql`count(*)` }).from(schema.clientContacts).where(and(eq(schema.clientContacts.clientId, clients.id), contactVisibleTo(me)))})`.mapWith(Number),
       })
       .from(clients)
@@ -155,7 +155,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
                 <th>Code</th>
                 <th>Client</th>
                 <th>Type</th>
-                <th>Business units</th>
+                <th>Business unit</th>
                 <th>Location</th>
                 <th>BD stage</th>
                 <th>Account owner</th>

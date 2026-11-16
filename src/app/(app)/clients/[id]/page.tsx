@@ -20,6 +20,8 @@ import { LogList } from "../../log/log-list";
 import { logFormOptions } from "../../log/options";
 import { SharingFields } from "./sharing-fields";
 import { VendorRegistrations, type VendorReg } from "./vendor-registrations";
+import { BidsSummary, BidsTab, loadClientBids, loadClientProjects } from "./client-bids";
+import { addProject, deleteProject, updateProject } from "@/lib/actions/projects";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   saved: { tone: "ok", text: "Client saved." },
@@ -28,6 +30,8 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   mergefail: { tone: "error", text: "Pick a different client to merge into." },
   sharefail: { tone: "error", text: "Tick at least one person to share with, or choose Private." },
   denied: { tone: "error", text: "You don't have permission to do that." },
+  projectinuse: { tone: "error", text: "That project has bids, so it can't be deleted." },
+  mergehas: { tone: "error", text: "This client already has bids or meetings, so it can't be merged. Ask a Super Admin to move them first." },
 };
 
 /** "Approved as Manager" plus the approver's remarks. */
@@ -91,7 +95,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
           accountOwner: { columns: { fullName: true } },
           accountGroup: { columns: { id: true, name: true } },
           createdBy: { columns: { fullName: true } },
-          businessUnits: { with: { businessUnit: { columns: { name: true } } } },
+          businessUnit: { columns: { name: true, code: true } },
         },
       })
     : undefined;
@@ -154,6 +158,9 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
   const [clientLogs, logOptions] = tab === "log" ? await Promise.all([logsFor(me, { clientId: id }), logFormOptions(me)]) : [[], null];
   const vendorRegs: VendorReg[] = tab === "vendor" ? await loadVendorRegs(id, me.id, editable) : [];
   const vendorCount = await db.$count(schema.vendorRegistrations, eq(schema.vendorRegistrations.clientId, id));
+  const bids = await loadClientBids(me, id); // only bids in the viewer's business units
+  const projects = tab === "bids" ? await loadClientProjects(id) : [];
+  const editableProjects = projects.filter((p) => editable || p.createdById === me.id);
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
   const activity =
     tab === "activity"
@@ -181,6 +188,9 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
             <Badge tone={statusTone(client.status)}>{labelize(client.status)}</Badge>
             <Link href={`/meetings/new?client=${id}`} className="btn-secondary">
               New meeting
+            </Link>
+            <Link href={`/bids/new?client=${id}`} className="btn-secondary">
+              New bid
             </Link>
             <Link href={`${base}/edit`} className="btn-primary">
               Edit client
@@ -222,11 +232,11 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         <section className="card p-4 text-sm lg:order-2">
           <dl className="space-y-3">
             {[
-              ["Client code", client.clientCode ?? "Given once the client has a business unit"],
+              ["Client code", client.clientCode],
               ["Short code", client.shortCode],
               ["BD stage", client.bdStage ? BD_STAGE_LABELS[client.bdStage] : null],
               ["Account owner", client.accountOwner?.fullName],
-              ["Business units", client.businessUnits.map((b) => b.businessUnit.name).join(", ")],
+              ["Business unit", client.businessUnit.name],
             ].map(([k, v]) => (
               <div key={k as string}>
                 <dt className="text-xs uppercase tracking-wide text-slate-500">{k}</dt>
@@ -264,6 +274,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               </div>
             )}
           </dl>
+          <BidsSummary clientId={id} bids={bids} />
         </section>
 
         <div className="lg:order-1 lg:col-span-2">
@@ -273,6 +284,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               { href: `${base}?tab=contacts`, label: `Contacts (${contacts.length})` },
               { href: `${base}?tab=meetings`, label: "Meetings" },
               { href: `${base}?tab=tasks`, label: "Tasks" },
+              { href: `${base}?tab=bids`, label: bids.length ? `Bids (${bids.length})` : "Bids" },
               { href: `${base}?tab=vendor`, label: vendorCount ? `Vendor registration (${vendorCount})` : "Vendor registration" },
               { href: `${base}?tab=log`, label: "Daily log" },
               { href: `${base}?tab=activity`, label: "Activity" },
@@ -476,6 +488,17 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
             </div>
           )}
 
+          {tab === "bids" && (
+            <BidsTab
+              clientId={id}
+              bids={bids}
+              projects={projects}
+              editableIds={editableProjects.map((p) => p.id)}
+              addProject={addProject.bind(null, id)}
+              updateProject={Object.fromEntries(editableProjects.map((p) => [p.id, updateProject.bind(null, id, p.id)]))}
+              deleteProject={Object.fromEntries(editableProjects.map((p) => [p.id, deleteProject.bind(null, id, p.id)]))}
+            />
+          )}
           {tab === "vendor" && <VendorRegistrations clientId={id} regs={vendorRegs} manage={editable} people={viewers} />}
 
           {tab === "log" && (

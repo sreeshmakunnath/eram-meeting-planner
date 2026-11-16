@@ -21,6 +21,9 @@ const KIND: Record<string, { label: string; dot: string }> = {
   CLIENT_PENDING: { label: "Client to review", dot: "bg-amber-500" },
   CLIENT_REVIEWED: { label: "Client", dot: "bg-amber-500" },
   VENDOR_REG_ASSIGNED: { label: "Vendor registration", dot: "bg-navy" },
+  BID_ASSIGNED: { label: "Bid", dot: "bg-brand" },
+  BIDS_TO_TRANSFER: { label: "Bids", dot: "bg-amber-500" },
+  BID_TEAM: { label: "Bid team", dot: "bg-brand" },
 };
 
 export default async function NotificationsPage() {

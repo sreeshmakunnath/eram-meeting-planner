@@ -28,4 +28,16 @@
 @media print {
   @page { size: A4; margin: 14mm; }
   body { background: #fff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Reports on paper (Export PDF): everything unfolded, no screen-only controls */
+  main [class*="max-h-"] { max-height: none !important; }
+  main [class*="overflow-"] { overflow: visible !important; }
+  main .sticky { position: static !important; }
+  main form[data-print-filters] { display: none !important; }
+  main .card { box-shadow: none; }
+  main .card:not(:has(table)) { break-inside: avoid; }
+  main tr, main li { break-inside: avoid; }
+  main thead { display: table-header-group; }
+  main table { font-size: 10px; }
+  main .table th, main .table td { padding: 4px 6px; }
+  main .mb-6 { margin-bottom: 0.75rem; }
 }

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { DueDelta } from "@/components/due-delta";
 import { Logo } from "@/components/logo";
-import { PrintButton } from "@/components/print-button";
+import { PdfButton } from "@/components/pdf-export";
 import { fmtDateTime } from "@/components/ui";
 import { selectableBus, teamIds } from "@/lib/access";
 import { isAdmin, requireUser } from "@/lib/auth";
@@ -83,7 +83,7 @@ export default async function BdReport(props: { searchParams: Promise<{ bu?: str
         <input type="month" name="month" defaultValue={ym} className="input" required />
       </label>
       <button className="btn-secondary">Show report</button>
-      {bu && <PrintButton />}
+      {bu && <PdfButton title="BD monthly report" orientation="landscape" />}
     </form>
   );
   if (!bu)

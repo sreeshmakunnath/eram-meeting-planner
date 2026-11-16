@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PdfButton } from "@/components/pdf-export";
 import { Empty, PageHeader } from "@/components/ui";
 import { requireUser } from "@/lib/auth";
 import { fmtPlainDate, todayRiyadh } from "@/lib/meetings";
@@ -83,9 +84,12 @@ export default async function TaskReportPage() {
         title="Task report"
         subtitle={me.role === "SUPER_ADMIN" ? "Workload and progress across the organisation." : me.role === "ADMIN" ? "Workload and progress in your business units." : "Tasks you can see."}
         actions={
-          <a href="/api/tasks/export?scope=all&bucket=any" className="btn-secondary">
-            Export all tasks
-          </a>
+          <>
+            <a href="/api/tasks/export?scope=all&bucket=any" className="btn-secondary">
+              Export all tasks
+            </a>
+            <PdfButton title="Task report" />
+          </>
         }
       />
       <div className="mb-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">

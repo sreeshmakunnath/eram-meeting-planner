@@ -1,0 +1,1 @@
+ALTER TABLE "bids" ADD COLUMN "decision_band" "probability_band";

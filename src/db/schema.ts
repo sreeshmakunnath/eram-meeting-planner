@@ -8,6 +8,7 @@ import {
   index,
   integer,
   jsonb,
+  numeric,
   pgEnum,
   pgTable,
   primaryKey,
@@ -146,10 +147,14 @@ export const clients = pgTable(
     shortCode: varchar("short_code", { length: 10 }),
     /**
      * System code such as CL-ENG-0007, for reports shared without client details. Assigned by a database
-     * trigger when the client gets its first business unit (that unit's code + one company-wide running
-     * number) and never changed afterwards. Null only while a client has no business unit.
+     * trigger when the client is added (its business unit's code + one company-wide running number) and
+     * never changed afterwards, even if the client moves to another unit.
      */
     clientCode: varchar("client_code", { length: 20 }).unique(),
+    /** The one business unit the client belongs to. Decides who sees the client and which unit's reports it's in. */
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id),
     type: clientTypeEnum("type").default("PROSPECT").notNull(),
     industry: varchar("industry", { length: 100 }),
     country: varchar("country", { length: 100 }).notNull(),
@@ -166,20 +171,11 @@ export const clients = pgTable(
     updatedAt: updatedAt(),
   },
   // One client per name, ignoring case: "SABIC" and "sabic" can't both exist.
-  (t) => [index("clients_status_idx").on(t.status), uniqueIndex("clients_name_lower_idx").on(sql`lower(${t.name})`)],
-);
-
-export const clientBusinessUnits = pgTable(
-  "client_business_units",
-  {
-    clientId: integer("client_id")
-      .notNull()
-      .references(() => clients.id, { onDelete: "cascade" }),
-    businessUnitId: integer("business_unit_id")
-      .notNull()
-      .references(() => businessUnits.id, { onDelete: "cascade" }),
-  },
-  (t) => [primaryKey({ columns: [t.clientId, t.businessUnitId] })],
+  (t) => [
+    index("clients_status_idx").on(t.status),
+    index("clients_bu_idx").on(t.businessUnitId),
+    uniqueIndex("clients_name_lower_idx").on(sql`lower(${t.name})`),
+  ],
 );
 
 export const clientContacts = pgTable(
@@ -252,7 +248,7 @@ export const branchesRelations = relations(branches, ({ many }) => ({ users: man
 export const businessUnitsRelations = relations(businessUnits, ({ many }) => ({
   users: many(users),
   members: many(userBusinessUnits),
-  clients: many(clientBusinessUnits),
+  clients: many(clients),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
@@ -282,15 +278,10 @@ export const clientsRelations = relations(clients, ({ one, many }) => ({
   accountOwner: one(users, { fields: [clients.accountOwnerId], references: [users.id] }),
   accountGroup: one(groups, { fields: [clients.accountGroupId], references: [groups.id] }),
   createdBy: one(users, { fields: [clients.createdById], references: [users.id] }),
+  businessUnit: one(businessUnits, { fields: [clients.businessUnitId], references: [businessUnits.id] }),
   contacts: many(clientContacts),
-  businessUnits: many(clientBusinessUnits),
   meetings: many(meetings),
   tasks: many(tasks),
-}));
-
-export const clientBusinessUnitsRelations = relations(clientBusinessUnits, ({ one }) => ({
-  client: one(clients, { fields: [clientBusinessUnits.clientId], references: [clients.id] }),
-  businessUnit: one(businessUnits, { fields: [clientBusinessUnits.businessUnitId], references: [businessUnits.id] }),
 }));
 
 export const clientContactsRelations = relations(clientContacts, ({ one, many }) => ({
@@ -682,6 +673,7 @@ export type Meeting = typeof meetings.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Group = typeof groups.$inferSelect;
 export type Client = typeof clients.$inferSelect;
+export type Bid = typeof bids.$inferSelect;
 
 /** In-app notifications: saved for every event that also emails a user, so nothing depends on SMTP. */
 export const notifications = pgTable(
@@ -823,4 +815,164 @@ export const vendorRegDocuments = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("vendor_reg_docs_reg_idx").on(t.registrationId)],
+);
+
+// ---------- Client projects: a client's larger project, grouping several bids ----------
+export const clientProjects = pgTable(
+  "client_projects",
+  {
+    id: serial("id").primaryKey(),
+    clientId: integer("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    location: varchar("location", { length: 150 }),
+    description: text("description"),
+    createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  // One project per name within a client, ignoring case
+  (t) => [uniqueIndex("client_projects_client_name_idx").on(t.clientId, sql`lower(${t.name})`)],
+);
+
+// ---------- Bids (tenders and enquiries) ----------
+export const bidStageEnum = pgEnum("bid_stage", ["ENQUIRY", "PRE_BID", "SUBMITTED", "UNDER_EVALUATION", "NEGOTIATION", "WON", "LOST", "CANCELLED", "DECLINED"]);
+export const probabilityBandEnum = pgEnum("probability_band", ["P0_20", "P21_50", "P51_80", "P81_90", "P100"]);
+export const bidTypeEnum = pgEnum("bid_type", ["BID", "RFQ", "RFP"]);
+export const tenderCategoryEnum = pgEnum("tender_category", ["GOVERNMENT", "SEMI_GOVERNMENT", "PRIVATE"]);
+export const submissionModeEnum = pgEnum("submission_mode", ["PORTAL", "ENVELOPE", "EMAIL", "HAND"]);
+const usdAmount = (name: string) => numeric(name, { precision: 14, scale: 2, mode: "number" });
+
+/** One enquiry or tender, from enquiry to won / lost. All amounts are in USD. */
+export const bids = pgTable(
+  "bids",
+  {
+    id: serial("id").primaryKey(),
+    // Identity
+    businessUnitId: integer("business_unit_id")
+      .notNull()
+      .references(() => businessUnits.id),
+    ownerId: integer("owner_id").references(() => users.id, { onDelete: "set null" }),
+    /** The register's BU ID, kept so a re-import updates the same bid. */
+    externalRef: varchar("external_ref", { length: 50 }).unique(),
+    quotationRef: varchar("quotation_ref", { length: 100 }),
+    clientTenderNo: varchar("client_tender_no", { length: 100 }),
+    clientRefNo: varchar("client_ref_no", { length: 100 }),
+    // Client
+    clientId: integer("client_id")
+      .notNull()
+      .references(() => clients.id),
+    /** The client's larger project this bid belongs to (several bids can share one). */
+    projectId: integer("project_id").references((): AnyPgColumn => clientProjects.id, { onDelete: "set null" }),
+    /** When ERAM bids through a main contractor: the end client. */
+    endClientId: integer("end_client_id").references(() => clients.id),
+    contactId: integer("contact_id").references(() => clientContacts.id, { onDelete: "set null" }),
+    // Opportunity
+    title: varchar("title", { length: 200 }).notNull(),
+    scope: text("scope"),
+    sector: varchar("sector", { length: 100 }),
+    tenderCategory: tenderCategoryEnum("tender_category"),
+    bidType: bidTypeEnum("bid_type").notNull(),
+    submissionMode: submissionModeEnum("submission_mode"),
+    country: varchar("country", { length: 100 }),
+    location: varchar("location", { length: 100 }),
+    site: varchar("site", { length: 200 }),
+    // Dates
+    /** When the client issued the enquiry / tender. */
+    issueDate: date("issue_date", { mode: "string" }).notNull(),
+    acknowledgedDate: date("acknowledged_date", { mode: "string" }),
+    tenderPurchasedDate: date("tender_purchased_date", { mode: "string" }),
+    reviewDeadline: date("review_deadline", { mode: "string" }),
+    clarificationDeadline: date("clarification_deadline", { mode: "string" }),
+    closingDate: date("closing_date", { mode: "string" }).notNull(),
+    submittedDate: date("submitted_date", { mode: "string" }),
+    expectedAwardDate: date("expected_award_date", { mode: "string" }),
+    expectedStartDate: date("expected_start_date", { mode: "string" }),
+    // Commercial (USD, excluding VAT)
+    bidValue: usdAmount("bid_value"),
+    manpowerEstimate: integer("manpower_estimate"),
+    durationMonths: integer("duration_months"),
+    optionMonths: integer("option_months"),
+    monthlyBilling: usdAmount("monthly_billing"),
+    profitPerHead: usdAmount("profit_per_head"),
+    retentionPct: numeric("retention_pct", { precision: 5, scale: 2, mode: "number" }),
+    advancePayment: varchar("advance_payment", { length: 200 }),
+    paymentTerms: text("payment_terms"),
+    invoicingSchedule: text("invoicing_schedule"),
+    insuranceTerms: text("insurance_terms"),
+    penaltyTerms: text("penalty_terms"),
+    risks: text("risks"),
+    // Outcome
+    stage: bidStageEnum("stage").default("ENQUIRY").notNull(),
+    probabilityBand: probabilityBandEnum("probability_band"),
+    /** The owner's band just before the bid was won or lost: what probability accuracy is measured against. */
+    decisionBand: probabilityBandEnum("decision_band"),
+    /** Why it was lost, cancelled or declined. */
+    closedReason: text("closed_reason"),
+    closedAt: timestamp("closed_at", { withTimezone: true }),
+    notes: text("notes"),
+    createdById: integer("created_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("bids_bu_idx").on(t.businessUnitId),
+    index("bids_client_idx").on(t.clientId),
+    index("bids_project_idx").on(t.projectId),
+    index("bids_owner_idx").on(t.ownerId),
+    index("bids_stage_idx").on(t.stage, t.closingDate),
+  ],
+);
+
+/** Quoted items on a bid (services, positions, rates). All optional; amounts in USD. */
+export const bidItems = pgTable(
+  "bid_items",
+  {
+    id: serial("id").primaryKey(),
+    bidId: integer("bid_id")
+      .notNull()
+      .references(() => bids.id, { onDelete: "cascade" }),
+    position: integer("position").notNull(),
+    description: varchar("description", { length: 300 }).notNull(),
+    unit: varchar("unit", { length: 50 }),
+    quantity: numeric("quantity", { precision: 12, scale: 2, mode: "number" }),
+    unitPrice: usdAmount("unit_price"),
+  },
+  (t) => [index("bid_items_bid_idx").on(t.bidId, t.position)],
+);
+
+/** Documents for a bid: a name and a link (SharePoint). Seen by whoever can see the bid. */
+/**
+ * People working on a bid with its owner. They see and edit the bid while they're members of its business unit;
+ * only the owner side (owner, owner's managers, unit Admins, Super Admins) adds or removes them, transfers or
+ * deletes. Their own managers get no access through them.
+ */
+export const bidTeam = pgTable(
+  "bid_team",
+  {
+    bidId: integer("bid_id")
+      .notNull()
+      .references(() => bids.id, { onDelete: "cascade" }),
+    userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    addedById: integer("added_by_id").references(() => users.id, { onDelete: "set null" }),
+    addedAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.bidId, t.userId] }), index("bid_team_user_idx").on(t.userId)],
+);
+
+export const bidDocuments = pgTable(
+  "bid_documents",
+  {
+    id: serial("id").primaryKey(),
+    bidId: integer("bid_id")
+      .notNull()
+      .references(() => bids.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 200 }).notNull(),
+    url: varchar("url", { length: 1000 }).notNull(),
+    addedById: integer("added_by_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("bid_documents_bid_idx").on(t.bidId)],
 );

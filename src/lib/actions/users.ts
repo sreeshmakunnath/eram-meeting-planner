@@ -5,13 +5,14 @@ import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { canManageUser, mergeBuIds, teamIds, userBuIds } from "@/lib/access";
+import { canControlBid, canManageUser, mergeBuIds, teamIds, userBuIds } from "@/lib/access";
 import { isSuperAdmin, requireAdmin, type SessionUser } from "@/lib/auth";
 import { FormError, int, ints, isEmail, req, str, toFormError } from "@/lib/form";
 import { appUrl, button, esc, sendMail } from "@/lib/mail";
 import { notify } from "@/lib/notifications";
+import { OPEN_BID_STAGES } from "@/lib/bids";
 import { hashPassword, passwordProblem } from "@/lib/password";
-import { sendResetEmail, sendWelcomeEmail } from "./auth";
+import { sendResetEmail, sendWelcomeEmail } from "@/lib/auth-emails";
 
 function readUser(fd: FormData, actor: SessionUser) {
   const username = req(fd, "username", "Username").toLowerCase();
@@ -152,7 +153,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     const admin = await requireAdmin();
     const id = int(fd, "id");
     if (!id) throw new FormError("Missing user.");
-    if (!(await canManageUser(admin, id))) throw new FormError("You can only manage users in your business units.");
+    if (!(await canManageUser(admin, id))) throw new FormError("You can only manage users who belong only to your business units. A Super Admin manages the others.");
     const data = readUser(fd, admin);
     const password = readPassword(fd);
     const [before] = await db.select().from(schema.users).where(eq(schema.users.id, id));
@@ -183,6 +184,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
 
 export async function setUserStatus(id: number, status: "ACTIVE" | "INACTIVE") {
   const admin = await requireAdmin();
+  let leftOver: { id: number; businessUnitId: number }[] = [];
   if (!(await canManageUser(admin, id))) redirect("/admin/users?msg=denied");
   if (id === admin.id && status === "INACTIVE") redirect(`/admin/users/${id}?msg=self`);
   if (status === "INACTIVE") {
@@ -195,9 +197,20 @@ export async function setUserStatus(id: number, status: "ACTIVE" | "INACTIVE") {
         .where(and(eq(schema.users.role, "SUPER_ADMIN"), eq(schema.users.status, "ACTIVE"), ne(schema.users.id, id)));
       if (!others.length) redirect(`/admin/users/${id}?msg=lastadmin`);
     }
+    // Open bids must be handed over first, or nobody would be working on them. Only the bids this Admin may
+    // edit are considered: the existence of bids in other units is never revealed to them. Those go to the
+    // Admins of their units (and Super Admins) as a notice once the user is deactivated.
+    const open = await db
+      .select({ id: schema.bids.id, businessUnitId: schema.bids.businessUnitId, ownerId: schema.bids.ownerId })
+      .from(schema.bids)
+      .where(and(eq(schema.bids.ownerId, id), inArray(schema.bids.stage, OPEN_BID_STAGES)));
+    for (const bid of open) if (await canControlBid(admin, bid)) redirect(`/admin/users/${id}?msg=hasbids`);
+    leftOver = open;
   }
   await db.update(schema.users).set({ status, updatedById: admin.id }).where(eq(schema.users.id, id));
   await audit(admin.id, status === "ACTIVE" ? "USER_ACTIVATED" : "USER_DEACTIVATED", "user", id);
+  if (leftOver.length) await tellUnitsToTransfer(id, leftOver);
+  if (status === "INACTIVE") await db.delete(schema.bidTeam).where(eq(schema.bidTeam.userId, id));
   revalidatePath("/admin/users");
   redirect(`/admin/users/${id}?msg=${status === "ACTIVE" ? "activated" : "deactivated"}`);
 }
@@ -220,4 +233,25 @@ export async function sendPasswordLink(id: number) {
     await audit(admin.id, user.passwordHash ? "PASSWORD_RESET_SENT" : "WELCOME_RESENT", "user", id);
   }
   redirect(`/admin/users/${id}?msg=linksent`);
+}
+
+/**
+ * A deactivated user still owns open bids the deactivating Admin couldn't see: tell the Admins of those units
+ * and the Super Admins (each sees only the count for units they're allowed to see).
+ */
+async function tellUnitsToTransfer(userId: number, bids: { id: number; businessUnitId: number }[]) {
+  const [user] = await db.select({ fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.id, userId));
+  const units = [...new Set(bids.map((b) => b.businessUnitId))];
+  const supers = (await db.select({ id: schema.users.id }).from(schema.users).where(and(eq(schema.users.role, "SUPER_ADMIN"), eq(schema.users.status, "ACTIVE")))).map((u) => u.id);
+  const body = (n: number) => `${user?.fullName ?? "A user"} was deactivated and still owns ${n} open bid${n === 1 ? "" : "s"}. Transfer ${n === 1 ? "it" : "them"} from their user page.`;
+  for (const bu of units) {
+    const n = bids.filter((b) => b.businessUnitId === bu).length;
+    const admins = await db
+      .select({ id: schema.users.id })
+      .from(schema.users)
+      .innerJoin(schema.userBusinessUnits, eq(schema.userBusinessUnits.userId, schema.users.id))
+      .where(and(eq(schema.users.role, "ADMIN"), eq(schema.users.status, "ACTIVE"), eq(schema.userBusinessUnits.businessUnitId, bu)));
+    await notify(admins.map((a) => a.id), { kind: "BIDS_TO_TRANSFER", title: "Open bids to transfer", body: body(n), href: `/admin/users/${userId}` });
+  }
+  await notify(supers, { kind: "BIDS_TO_TRANSFER", title: "Open bids to transfer", body: body(bids.length), href: `/admin/users/${userId}` });
 }

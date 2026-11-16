@@ -48,7 +48,7 @@ export async function targetScheduleRows(me: SessionUser, batch?: string, scope?
         ne(schema.clients.status, "INACTIVE"),
         trackerVisibleTo(me),
         scope && "bu" in scope
-          ? sql`exists (select 1 from client_business_units cb where cb.client_id = ${schema.clients.id} and cb.business_unit_id = ${scope.bu})`
+          ? eq(schema.clients.businessUnitId, scope.bu)
           : undefined,
         scope && "team" in scope ? or(eq(schema.clients.accountOwnerId, me.id), sql`${schema.clients.accountOwnerId} in ${teamOf(me.id)}`) : undefined,
         batch ? eq(schema.clients.targetBatch, batch) : or(isNotNull(schema.clients.targetBatch), eq(schema.clients.type, "PROSPECT")),

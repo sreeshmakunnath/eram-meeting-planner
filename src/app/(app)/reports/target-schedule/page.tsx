@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PdfButton } from "@/components/pdf-export";
 import { Badge, Empty, PageHeader } from "@/components/ui";
 import { createBdTasks, importTargetSchedule } from "@/lib/actions/target";
 import { canManageClient, teamIds } from "@/lib/access";
@@ -74,6 +75,7 @@ export default async function TargetSchedulePage(props: { searchParams: Promise<
             <a href={`/api/reports/target-schedule${searchParams.batch ? `?batch=${encodeURIComponent(searchParams.batch)}` : ""}`} className="btn-secondary">
               Export Excel
             </a>
+            <PdfButton title="BD tracker" />
           </>
         }
       />

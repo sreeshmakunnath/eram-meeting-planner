@@ -1,4 +1,5 @@
 import { and, asc, eq, exists, gte, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import { PdfButton } from "@/components/pdf-export";
 import Link from "next/link";
 import { fmtDateTime, labelize, Notice, PageHeader, Tabs } from "@/components/ui";
 import { db, schema } from "@/db";
@@ -18,6 +19,8 @@ import { vendorRegCounts, vendorRegsPendingWith } from "@/lib/vendor-reg-stats";
 import { VENDOR_REG_LABEL } from "@/lib/vendor-reg";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
 import { orgStats } from "@/lib/org-stats";
+import { bidMix } from "@/lib/bid-stats";
+import { usdShort } from "@/lib/bids";
 import { clientsToApprove } from "@/lib/client-approval";
 import { fmtDay, fmtPlainDate, fmtTime, involves, riyadh, STATUS_CHIP, STATUS_LABEL, todayRiyadh, visibleTo } from "@/lib/meetings";
 
@@ -42,7 +45,11 @@ export default async function Dashboard(props: { searchParams: Promise<{ denied?
 
   return (
     <>
-      <PageHeader title={`Welcome, ${me.name.split(" ")[0]}`} subtitle={admin ? `Your work and the ${isSuperAdmin(me) ? "organisation" : "business unit"} overview.` : "Your dashboard."} />
+      <PageHeader
+        title={`Welcome, ${me.name.split(" ")[0]}`}
+        subtitle={admin ? `Your work and the ${isSuperAdmin(me) ? "organisation" : "business unit"} overview.` : "Your dashboard."}
+        actions={tab === "org" ? <PdfButton title={isSuperAdmin(me) ? "Organisation overview" : "Business unit overview"} orientation="landscape" /> : undefined}
+      />
       {searchParams.denied && <Notice tone="error">That page is for Admins only.</Notice>}
       {admin && (
         <Tabs
@@ -58,6 +65,40 @@ export default async function Dashboard(props: { searchParams: Promise<{ denied?
   );
 }
 
+const yearAgo = (today: string) => new Date(Date.parse(`${today}T00:00:00Z`) - 364 * 86400_000).toISOString().slice(0, 10);
+
+/** Small bid card: open bids plus those closed in the last 12 months, by stage group. */
+function BidsCard({ title, mix, link, linkLabel, href, empty, className }: {
+  title: string;
+  mix: Awaited<ReturnType<typeof bidMix>>;
+  link: string;
+  linkLabel: string;
+  href: (group: string) => string;
+  empty: string;
+  className: string;
+}) {
+  return (
+    <section className={`card p-4 ${className}`}>
+      <div className="mb-3 flex items-baseline justify-between gap-2">
+        <h3 className="font-semibold text-navy">{title}</h3>
+        <Link href={link} className="link shrink-0 text-xs">
+          {linkLabel}
+        </Link>
+      </div>
+      {mix.total === 0 ? (
+        <p className="text-sm text-slate-500">{empty}</p>
+      ) : (
+        <>
+          <Donut total={mix.total} centerLabel="bids" items={mix.groups.map((g) => ({ key: g.key, label: g.label, n: g.n, color: g.color, href: href(g.key) }))} />
+          <p className="mt-2 text-xs text-slate-500">
+            {mix.open} open · {usdShort(mix.openValue)} · weighted {usdShort(mix.weighted)}. Closed bids: issued in the last 12 months.
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
 async function MyWork({ me }: { me: SessionUser }) {
   const personal = { ...me, role: "USER" as const }; // "my" numbers, even for Admins
   const mine = involves(me.id); // and without a manager's team
@@ -66,7 +107,7 @@ async function MyWork({ me }: { me: SessionUser }) {
   const weekStart = riyadh(new Date(Date.parse(`${today}T00:00:00Z`) - dow * 86400_000).toISOString().slice(0, 10), "00:00");
   const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
   const now = new Date();
-  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions, toApprove, vendorPending] = await Promise.all([
+  const [myGroupList, myWeek, upcoming, [briefsPending], [myActions], myOpen, team, watched, logOptions, toApprove, vendorPending, myBids] = await Promise.all([
     db
       .select({ id: schema.groups.id, name: schema.groups.name })
       .from(schema.groupMembers)
@@ -107,6 +148,7 @@ async function MyWork({ me }: { me: SessionUser }) {
     logFormOptions(me),
     clientsToApprove(me),
     vendorRegsPendingWith(me.id),
+    bidMix(me, yearAgo(today), me.id), // bids I own or am on the team of
   ]);
   const myOverdue = myOpen.filter((t) => t.overdue);
   const in7 = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86400_000).toISOString().slice(0, 10);
@@ -250,55 +292,66 @@ async function MyWork({ me }: { me: SessionUser }) {
           )}
         </section>
       </div>
-      {team.length > 0 && (
-        <section className="card mt-4 p-4">
-          <div className="mb-2 flex items-baseline justify-between">
-            <h3 className="font-semibold text-navy">My team</h3>
-            <Link href="/tasks?scope=team&bucket=open" className="link text-sm">
-              All team tasks →
-            </Link>
-          </div>
-          <div className="max-h-[16rem] overflow-y-auto">
-            <table className="w-full text-sm">
-              <thead className="sticky top-0 bg-white">
-                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  <th className="py-2 pr-4">Person</th>
-                  <th className="py-2 pr-4 text-right">Open tasks</th>
-                  <th className="py-2 pr-4 text-right">Overdue</th>
-                  <th className="py-2 text-right">Completed</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {team.map((p) => (
-                  <tr key={p.id} className="hover:bg-slate-50">
-                    <td className="py-1.5 pr-4 font-medium text-slate-700">
-                      {p.name}
-                      {!p.direct && <span className="ml-2 text-xs font-normal text-slate-400">via a reportee</span>}
-                    </td>
-                    {(
-                      [
-                        ["open", p.open, "text-navy"],
-                        ["overdue", p.overdue, "text-red-600"],
-                        ["completed", p.completed, "text-emerald-700"],
-                      ] as const
-                    ).map(([bucket, v, tone]) => (
-                      <td key={bucket} className={`py-1.5 text-right tabular-nums ${bucket === "completed" ? "" : "pr-4"}`}>
-                        {v ? (
-                          <Link href={`/tasks?scope=all&bucket=${bucket}&user=${p.id}`} className={`font-semibold hover:underline ${tone}`}>
-                            {v}
-                          </Link>
-                        ) : (
-                          <span className="text-slate-400">0</span>
-                        )}
-                      </td>
-                    ))}
+      <div className="mt-4 grid gap-4 lg:grid-cols-12">
+        <BidsCard
+          title="My bids"
+          mix={myBids}
+          link="/bids?mine=1&stage=ALL"
+          linkLabel="All my bids →"
+          href={(g) => `/bids?mine=1&stage=${g}`}
+          empty="You don't own or work on any bids."
+          className={team.length ? "lg:col-span-5 xl:col-span-4" : "lg:col-span-6 xl:col-span-4"}
+        />
+        {team.length > 0 && (
+          <section className="card p-4 lg:col-span-7 xl:col-span-8">
+            <div className="mb-2 flex items-baseline justify-between">
+              <h3 className="font-semibold text-navy">My team</h3>
+              <Link href="/tasks?scope=team&bucket=open" className="link text-sm">
+                All team tasks →
+              </Link>
+            </div>
+            <div className="max-h-[16rem] overflow-y-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-white">
+                  <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    <th className="py-2 pr-4">Person</th>
+                    <th className="py-2 pr-4 text-right">Open tasks</th>
+                    <th className="py-2 pr-4 text-right">Overdue</th>
+                    <th className="py-2 text-right">Completed</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {team.map((p) => (
+                    <tr key={p.id} className="hover:bg-slate-50">
+                      <td className="py-1.5 pr-4 font-medium text-slate-700">
+                        {p.name}
+                        {!p.direct && <span className="ml-2 text-xs font-normal text-slate-400">via a reportee</span>}
+                      </td>
+                      {(
+                        [
+                          ["open", p.open, "text-navy"],
+                          ["overdue", p.overdue, "text-red-600"],
+                          ["completed", p.completed, "text-emerald-700"],
+                        ] as const
+                      ).map(([bucket, v, tone]) => (
+                        <td key={bucket} className={`py-1.5 text-right tabular-nums ${bucket === "completed" ? "" : "pr-4"}`}>
+                          {v ? (
+                            <Link href={`/tasks?scope=all&bucket=${bucket}&user=${p.id}`} className={`font-semibold hover:underline ${tone}`}>
+                              {v}
+                            </Link>
+                          ) : (
+                            <span className="text-slate-400">0</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+      </div>
     </>
   );
 }
@@ -313,7 +366,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
   const unit = scoped ? units.find((u) => u.id === scoped.buIds[0]) : undefined;
   const q = (path: string) => (scoped ? `${path}${path.includes("?") ? "&" : "?"}bu=${scoped.buIds[0]}` : path);
 
-  const [stages, org, [monthCount], [tbs], statusRows, tasks, upcoming, activity, vendor] = await Promise.all([
+  const [stages, org, [monthCount], [tbs], statusRows, tasks, upcoming, activity, vendor, bids] = await Promise.all([
     db.select({ stage: schema.clients.bdStage, n: count }).from(schema.clients).where(and(ne(schema.clients.status, "INACTIVE"), clientVisibleTo(viewer))).groupBy(schema.clients.bdStage),
     orgStats(viewer),
     db
@@ -326,6 +379,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
     meetingsBetween(viewer, now, new Date(now.getTime() + 7 * 86400_000), notInArray(m.status, ["CANCELLED", "POSTPONED"])),
     recentActivity(viewer, 15),
     vendorRegCounts(viewer),
+    bidMix(viewer, yearAgo(today)), // only bids the Admin may see (or the picked unit's)
   ]);
   const stageCount = (s: string) => stages.find((x) => x.stage === s)?.n ?? 0;
   const flagCount = (f: Flag) => statusRows.filter((r) => r.flag === f).length;
@@ -352,7 +406,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
           <noscript>
             <button className="btn-secondary">Show</button>
           </noscript>
-          {unit && <span className="text-sm text-slate-500">Clients, meetings, tasks and vendor registrations of {unit.name} only.</span>}
+          {unit && <span className="text-sm text-slate-500">Clients, meetings, tasks, vendor registrations and bids of {unit.name} only.</span>}
         </form>
       )}
 
@@ -379,13 +433,15 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
       </div>
 
       <div className="mb-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-12">
-        <section className="card p-4 lg:col-span-2 xl:col-span-6">
-          <div className="mb-1 flex items-baseline justify-between">
-            <h3 className="font-semibold text-navy">Meetings held per month</h3>
-            <span className="text-xs text-slate-500">Completed meetings, last 12 months</span>
-          </div>
-          <MonthColumns points={org.months} currentKey={org.thisMonth} />
-        </section>
+        <BidsCard
+          title="Bids"
+          mix={bids}
+          link={q("/bids/dashboard")}
+          linkLabel="Bids dashboard →"
+          href={(g) => q(`/bids/dashboard?tab=${g === "PREPARING" || g === "AWAITING" ? "pipeline" : "results"}`)}
+          empty={`No bids${unit ? ` in ${unit.name}` : ""} yet.`}
+          className="lg:col-span-2 xl:col-span-6"
+        />
         <section className="card p-4 xl:col-span-3">
           <div className="mb-3 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">Client status</h3>
@@ -426,6 +482,32 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
       </div>
 
       <div className="mb-4 grid gap-4 lg:grid-cols-12">
+        <section className="card p-4 lg:col-span-12 xl:col-span-8">
+          <div className="mb-1 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Meetings held per month</h3>
+            <span className="text-xs text-slate-500">Completed meetings, last 12 months</span>
+          </div>
+          <MonthColumns points={org.months} currentKey={org.thisMonth} />
+        </section>
+        <section className="card p-4 lg:col-span-12 xl:col-span-4">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h3 className="font-semibold text-navy">Vendor registrations</h3>
+            <Link href={q("/reports/vendor-registrations")} className="link text-xs">
+              Full report →
+            </Link>
+          </div>
+          {vendor.total === 0 ? (
+            <p className="text-sm text-slate-500">No vendor registrations{unit ? ` in ${unit.name}` : ""} yet.</p>
+          ) : (
+            <Donut
+              total={vendor.total}
+              items={vendor.stages.map((g) => ({ key: g.key, label: g.label, n: g.n, color: g.color, href: q(`/reports/vendor-registrations?stage=${g.key}`) }))}
+            />
+          )}
+        </section>
+      </div>
+
+      <div className="mb-4 grid gap-4 lg:grid-cols-12">
         <section className="card p-4 lg:col-span-4 xl:col-span-3">
           <div className="mb-3 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">Tasks</h3>
@@ -447,7 +529,7 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
             ))}
           </div>
         </section>
-        <section className="card p-4 lg:col-span-8 xl:col-span-5">
+        <section className="card p-4 lg:col-span-8 xl:col-span-9">
           <div className="mb-2 flex items-baseline justify-between">
             <h3 className="font-semibold text-navy">Tasks by assignee</h3>
             <span className="text-xs text-slate-500">Click a number for the list · a task with several people counts for each</span>
@@ -491,22 +573,6 @@ async function OrgOverview({ me, bu }: { me: SessionUser; bu?: string }) {
                 </tbody>
               </table>
             </div>
-          )}
-        </section>
-        <section className="card p-4 lg:col-span-12 xl:col-span-4">
-          <div className="mb-3 flex items-baseline justify-between">
-            <h3 className="font-semibold text-navy">Vendor registrations</h3>
-            <Link href={q("/reports/vendor-registrations")} className="link text-xs">
-              Full report →
-            </Link>
-          </div>
-          {vendor.total === 0 ? (
-            <p className="text-sm text-slate-500">No vendor registrations{unit ? ` in ${unit.name}` : ""} yet.</p>
-          ) : (
-            <Donut
-              total={vendor.total}
-              items={vendor.stages.map((g) => ({ key: g.key, label: g.label, n: g.n, color: g.color, href: q(`/reports/vendor-registrations?stage=${g.key}`) }))}
-            />
           )}
         </section>
       </div>

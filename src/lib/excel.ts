@@ -1,9 +1,15 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import ExcelJS from "exceljs";
 
 const NAVY = "FF1F3864";
 const BLUE = "FF2E75B6";
 
-/** Builds a branded worksheet: title row, header row, data rows, filters, frozen header. */
+/** The ERAM Workforce logo (black text, for white sheets). Shipped with the functions via next.config. */
+let logo: Promise<Buffer | null> | null = null;
+const logoPng = () => (logo ??= readFile(path.join(process.cwd(), "public", "eram-workforce-logo-400w.png")).catch(() => null));
+
+/** Builds a branded worksheet: logo row, title row, header row, data rows, filters, frozen header. */
 export async function buildWorkbook(opts: {
   sheet: string;
   title: string;
@@ -13,25 +19,30 @@ export async function buildWorkbook(opts: {
 }) {
   const wb = new ExcelJS.Workbook();
   wb.creator = "ERAM Meeting Planner";
-  const ws = wb.addWorksheet(opts.sheet, { views: [{ state: "frozen", ySplit: opts.subtitle ? 3 : 2 }] });
+  const ws = wb.addWorksheet(opts.sheet, { views: [{ state: "frozen", ySplit: opts.subtitle ? 4 : 3 }] });
   const n = opts.columns.length;
   ws.columns = opts.columns.map((c) => ({ width: c.width }));
 
-  ws.mergeCells(1, 1, 1, n);
-  const t = ws.getCell(1, 1);
+  // Row 1: the logo (400 × 115 px image shown at 160 × 46)
+  ws.getRow(1).height = 38;
+  const png = await logoPng();
+  if (png) ws.addImage(wb.addImage({ buffer: png as unknown as ExcelJS.Buffer, extension: "png" }), { tl: { col: 0.1, row: 0.1 }, ext: { width: 160, height: 46 }, editAs: "oneCell" });
+
+  ws.mergeCells(2, 1, 2, n);
+  const t = ws.getCell(2, 1);
   t.value = opts.title;
   t.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" }, name: "Calibri" };
   t.fill = { type: "pattern", pattern: "solid", fgColor: { argb: NAVY } };
   t.alignment = { horizontal: "center", vertical: "middle" };
-  ws.getRow(1).height = 26;
+  ws.getRow(2).height = 26;
 
-  let headerRow = 2;
+  let headerRow = 3;
   if (opts.subtitle) {
-    ws.mergeCells(2, 1, 2, n);
-    const s = ws.getCell(2, 1);
+    ws.mergeCells(3, 1, 3, n);
+    const s = ws.getCell(3, 1);
     s.value = opts.subtitle;
     s.font = { italic: true, size: 10, color: { argb: "FF6B7280" } };
-    headerRow = 3;
+    headerRow = 4;
   }
   const h = ws.getRow(headerRow);
   opts.columns.forEach((c, i) => {

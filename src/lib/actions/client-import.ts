@@ -101,7 +101,7 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
   if (!ws) return { error: 'No "Client" column found in the first 10 rows. Use the template, or name the column "Client".' };
 
   const [existing, users, allBus, visible, [me]] = await Promise.all([
-    db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode }).from(schema.clients),
+    db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode, buId: schema.clients.businessUnitId }).from(schema.clients),
     db.select({ id: schema.users.id, email: schema.users.email, username: schema.users.username, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
     db.select({ id: schema.businessUnits.id, name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)),
     isSuperAdmin(admin) ? null : db.select({ id: schema.clients.id }).from(schema.clients).where(clientVisibleTo(admin)),
@@ -208,11 +208,14 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
       if (u) f.accountOwnerId = u.id;
       else warnings.push({ row: r, client: name, message: `Account owner "${values.owner}" isn't an active user, so it was left empty.` });
     }
-    for (const b of values.businessUnits.split(/[;,/\n]/).map((x) => x.trim()).filter(Boolean)) {
-      const unit = bus.find((x) => norm(x.name) === norm(b));
+    // One business unit per client, used when the client is new (existing clients stay in their unit)
+    const named = values.businessUnits.split(/[;,/\n]/).map((x) => x.trim()).filter(Boolean);
+    if (named.length > 1) warnings.push({ row: r, client: name, message: `A client belongs to one business unit; only "${named[0]}" was used.` });
+    if (named.length && !plan.existingId && !plan.buIds.length) {
+      const unit = bus.find((x) => norm(x.name) === norm(named[0]));
       if (!unit)
-        warnings.push({ row: r, client: name, message: `Business unit "${b}" isn't ${isSuperAdmin(admin) ? "in the master list" : "one of your business units"}, so it was left out.` });
-      else if (!plan.buIds.includes(unit.id)) plan.buIds.push(unit.id);
+        warnings.push({ row: r, client: name, message: `Business unit "${named[0]}" isn't ${isSuperAdmin(admin) ? "in the master list" : "one of your business units"}, so your primary unit was used.` });
+      else plan.buIds.push(unit.id);
     }
 
     // Contact on this row (skip ones the client already has, matched by email or else by name).
@@ -229,6 +232,22 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
       warnings.push({ row: r, client: name, message: "Contact details without a contact name were skipped." });
     }
     plans.set(key, plan);
+  }
+
+  // The account owner sees all of a client's bids, so they must be an active member of the client's unit
+  const members = await db
+    .select({ userId: schema.userBusinessUnits.userId, buId: schema.userBusinessUnits.businessUnitId })
+    .from(schema.userBusinessUnits)
+    .innerJoin(schema.users, eq(schema.users.id, schema.userBusinessUnits.userId))
+    .where(eq(schema.users.status, "ACTIVE"));
+  for (const p of plans.values()) {
+    const owner = p.fields.accountOwnerId;
+    if (!owner) continue;
+    const unit = p.existingId ? existing.find((e) => e.id === p.existingId)?.buId : (p.buIds[0] ?? me.primaryBu);
+    if (!members.some((m) => m.userId === owner && m.buId === unit)) {
+      delete p.fields.accountOwnerId;
+      warnings.push({ row: p.row, client: p.name, message: "The account owner isn't a member of the client's business unit, so it was left unchanged." });
+    }
   }
 
   // New clients need a country.
@@ -258,19 +277,14 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
     if (id) {
       if (Object.keys(p.fields).length) await db.update(schema.clients).set(p.fields).where(eq(schema.clients.id, id));
     } else {
+      // A new client without a business unit gets the importing Admin's primary unit, so it doesn't vanish from view.
+      const businessUnitId = p.buIds[0] ?? me.primaryBu;
       const [c] = await db
         .insert(schema.clients)
-        .values({ type: "PROSPECT", status: "ACTIVE", ...p.fields, name: p.name, country: p.fields.country!, createdById: admin.id })
+        .values({ type: "PROSPECT", status: "ACTIVE", ...p.fields, name: p.name, country: p.fields.country!, businessUnitId, createdById: admin.id })
         .returning({ id: schema.clients.id });
       id = c.id;
-      // A new client without a business unit gets the importing Admin's primary unit, so it doesn't vanish from view.
-      if (!p.buIds.length && me) p.buIds.push(me.primaryBu);
     }
-    if (p.buIds.length)
-      await db
-        .insert(schema.clientBusinessUnits)
-        .values(p.buIds.map((businessUnitId) => ({ clientId: id!, businessUnitId })))
-        .onConflictDoNothing();
     if (p.contacts.length)
       await db.insert(schema.clientContacts).values(p.contacts.map((c, i) => ({ ...c, clientId: id!, isPrimary: !p.hasPrimary && i === 0, ownerId: admin.id })));
   }

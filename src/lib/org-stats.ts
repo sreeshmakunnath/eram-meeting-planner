@@ -45,11 +45,10 @@ export async function orgStats(me: SessionUser) {
       .where(held)
       .groupBy(schema.meetingBusinessUnits.businessUnitId),
     db
-      .select({ id: schema.clientBusinessUnits.businessUnitId, n: count })
-      .from(schema.clientBusinessUnits)
-      .innerJoin(schema.clients, eq(schema.clientBusinessUnits.clientId, schema.clients.id))
+      .select({ id: schema.clients.businessUnitId, n: count })
+      .from(schema.clients)
       .where(ne(schema.clients.status, "INACTIVE"))
-      .groupBy(schema.clientBusinessUnits.businessUnitId),
+      .groupBy(schema.clients.businessUnitId),
     db.select({ status: schema.clients.status, n: count }).from(schema.clients).where(clientVisibleTo(me)).groupBy(schema.clients.status),
     db
       .select({ n: count })

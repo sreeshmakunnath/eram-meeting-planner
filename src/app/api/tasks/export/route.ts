@@ -7,7 +7,7 @@ import { CATEGORY_LABEL, TASK_STATUS_LABEL } from "@/lib/tasks";
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.id || (session as { inactive?: boolean }).inactive) return new Response("Unauthorized", { status: 401 });
   const f = Object.fromEntries(new URL(req.url).searchParams) as TaskFilters;
   const rows = await listTasks(session.user, f, 5000);
   const buf = await buildWorkbook({

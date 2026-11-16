@@ -7,7 +7,7 @@ import { fmtTime, PRIORITY_LABEL, riyadhParts, STATUS_LABEL, TYPE_LABEL, todayRi
 /** The Client Meeting Planner as an Excel file — same columns as the ERAM Holdings sheet. */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.id || (session as { inactive?: boolean }).inactive) return new Response("Unauthorized", { status: 401 });
   const f = Object.fromEntries(new URL(req.url).searchParams) as MeetingFilters;
   const rows = await listMeetings(session.user, f, 5000);
   const buf = await buildWorkbook({

@@ -8,7 +8,7 @@ import { targetScheduleRows } from "@/lib/target-schedule";
 /** The BD Target Schedule in the layout of the original sheet. */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.id || (session as { inactive?: boolean }).inactive) return new Response("Unauthorized", { status: 401 });
   const batch = new URL(req.url).searchParams.get("batch") ?? undefined;
   const rows = await targetScheduleRows(session.user, batch);
   const buf = await buildWorkbook({

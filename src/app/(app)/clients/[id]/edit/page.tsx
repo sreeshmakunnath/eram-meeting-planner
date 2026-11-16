@@ -12,14 +12,13 @@ export default async function EditClientPage(props: { params: Promise<{ id: stri
   const id = Number(params.id);
   const [client] = Number.isInteger(id) ? await db.select().from(schema.clients).where(eq(schema.clients.id, id)) : [];
   if (!client) notFound();
-  // Anyone who can see the client edits its details; owner and business units need canManageClient
+  // Anyone who can see the client edits its details; owner and business unit need canManageClient
   if (!(await canSeeClient(me, id))) notFound();
   const full = await canManageClient(me, client);
-  const bus = await db.select().from(schema.clientBusinessUnits).where(eq(schema.clientBusinessUnits.clientId, id));
   return (
     <>
       <PageHeader title={`Edit ${client.name}`} />
-      <ClientForm me={me} client={client} buIds={bus.map((b) => b.businessUnitId)} limited={!full} />
+      <ClientForm me={me} client={client} limited={!full} />
     </>
   );
 }

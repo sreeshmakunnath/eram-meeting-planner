@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, ne, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { clientVisibleTo } from "./access";
 import type { SessionUser } from "./auth";
@@ -44,3 +44,33 @@ export const BD_STAGE_LABELS: Record<string, string> = {
   ACTIVE_CLIENT: "Active client",
 };
 export const INDUSTRIES = ["Oil & gas", "EPC", "Petrochemicals", "Marine & offshore", "Government", "Construction", "Manufacturing", "Other"];
+
+/**
+ * Clients a bid can be for: active or pending clients the person can see that are in at least one of their
+ * business units (any unit for a Super Admin), each with its units. `includeId` keeps a bid's current client.
+ */
+export async function bidClientOptions(me: SessionUser, includeId?: number | null) {
+  const c = schema.clients;
+  const rows = await db
+    .select({
+      id: c.id,
+      name: c.name,
+      code: c.clientCode,
+      buIds: sql<number[]>`array[${c.businessUnitId}]`,
+    })
+    .from(c)
+    .where(and(ne(c.status, "INACTIVE"), includeId ? or(clientVisibleTo(me), eq(c.id, includeId)) : clientVisibleTo(me)))
+    .orderBy(asc(c.name));
+  const mine = (ids: number[]) => me.role === "SUPER_ADMIN" || ids.some((id) => me.buIds.includes(id));
+  return rows.map((r) => ({ ...r, buIds: r.buIds.map(Number) })).filter((r) => r.buIds.length && (mine(r.buIds) || r.id === includeId));
+}
+
+/** Projects of these clients, for the bid form's project picker. */
+export const projectOptions = (clientIds: number[]) =>
+  clientIds.length
+    ? db
+        .select({ id: schema.clientProjects.id, clientId: schema.clientProjects.clientId, name: schema.clientProjects.name })
+        .from(schema.clientProjects)
+        .where(inArray(schema.clientProjects.clientId, clientIds))
+        .orderBy(asc(schema.clientProjects.name))
+    : Promise.resolve([]);

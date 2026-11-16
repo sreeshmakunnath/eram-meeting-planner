@@ -1,10 +1,16 @@
-import { eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
+import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, fmtDateTime, Notice, PageHeader } from "@/components/ui";
+import { fmtPlainDate } from "@/lib/meetings";
 import { db, schema } from "@/db";
+import { transferOpenBids } from "@/lib/actions/bids";
 import { sendPasswordLink, setUserStatus, unlockUser, updateUser } from "@/lib/actions/users";
-import { canManageUser, userBuIds } from "@/lib/access";
-import { requireAdmin } from "@/lib/auth";
+import { canControlBid, canManageUser, userBuIds } from "@/lib/access";
+import { requireAdmin, type SessionUser } from "@/lib/auth";
+import { BID_STAGE_LABEL, OPEN_BID_STAGES } from "@/lib/bids";
+import { activeUsers } from "@/lib/queries";
 import { UserForm } from "../user-form";
 
 const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
@@ -16,7 +22,73 @@ const messages: Record<string, { tone: "ok" | "error"; text: string }> = {
   linksent: { tone: "ok", text: "Password link emailed." },
   self: { tone: "error", text: "You can't deactivate your own account." },
   lastadmin: { tone: "error", text: "This is the last active Super Admin. Make someone else Super Admin first." },
+  hasbids: { tone: "error", text: "This user still owns open bids. Transfer them to someone else first (below), then deactivate." },
 };
+
+/**
+ * The person's open bids, for handing over (e.g. when they leave). Only bids this Admin may edit are listed by
+ * name; the rest are only counted, so nothing about another unit's bids is shown.
+ */
+async function OpenBids({ me, userId, name }: { me: SessionUser; userId: number; name: string }) {
+  const b = schema.bids;
+  const open = await db
+    .select({ id: b.id, title: b.title, stage: b.stage, closingDate: b.closingDate, businessUnitId: b.businessUnitId, ownerId: b.ownerId, client: schema.clients.name })
+    .from(b)
+    .innerJoin(schema.clients, eq(b.clientId, schema.clients.id))
+    .where(and(eq(b.ownerId, userId), inArray(b.stage, OPEN_BID_STAGES)))
+    .orderBy(asc(b.closingDate));
+  const mine: typeof open = [];
+  for (const bid of open) if (await canControlBid(me, bid)) mine.push(bid);
+  // Only bids this Admin may edit: nothing shows that others exist
+  if (!mine.length) return null;
+  // New owner: active members of every unit these bids are in
+  const units = [...new Set(mine.map((x) => x.businessUnitId))];
+  const candidates = (await activeUsers()).filter((u) => u.id !== userId && units.every((bu) => u.buIds.map(Number).includes(bu)));
+  return (
+    <section className="card mb-4 p-4">
+      <h2 className="font-semibold text-navy">Open bids owned by {name}</h2>
+      <p className="mt-1 text-sm text-slate-600">
+        Hand these to someone else before deactivating this user. The new owner gets access; {name} loses it.
+        {" "}Bids in units you don&apos;t administer, if there are any, aren&apos;t shown here: their unit&apos;s Admins are notified when the user is deactivated.
+      </p>
+      {mine.length > 0 && (
+        <div className="mt-3 grid gap-4 lg:grid-cols-12">
+          <ul className="divide-y divide-slate-100 text-sm lg:col-span-8">
+            {mine.map((x) => (
+              <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <Link href={`/bids/${x.id}`} className="link truncate">
+                  {x.title}
+                </Link>
+                <span className="text-xs text-slate-500">
+                  {x.client} · {BID_STAGE_LABEL[x.stage]} · closes {fmtPlainDate(x.closingDate)}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="lg:col-span-4">
+            <ActionForm action={transferOpenBids.bind(null, userId)} className="space-y-2">
+              <label className="block">
+                <span className="label">New owner *</span>
+                <select name="toUserId" className="input" required defaultValue="">
+                  <option value="">Select…</option>
+                  {candidates.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.fullName}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-xs text-slate-500">
+                  {candidates.length ? "Active members of the bids' business units." : "Nobody else is an active member of all these bids' units. Transfer them one by one from each bid."}
+                </span>
+              </label>
+              <SubmitButton>Transfer {mine.length} bid{mine.length === 1 ? "" : "s"}</SubmitButton>
+            </ActionForm>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default async function EditUserPage(props: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string }> }) {
   const params = await props.params;
@@ -63,6 +135,7 @@ export default async function EditUserPage(props: { params: Promise<{ id: string
           </button>
         </form>
       </div>
+      <OpenBids me={me} userId={id} name={user.fullName} />
       <UserForm me={me} action={updateUser} user={user} groupIds={memberships.map((m) => m.groupId)} buIds={buIds} managerIds={managers.map((m) => m.id)} />
     </>
   );

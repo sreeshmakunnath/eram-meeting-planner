@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { CheckboxList } from "@/components/checkbox-list";
 import { ClientNameField } from "@/components/client-name-field";
 import { Field, labelize } from "@/components/ui";
 import type { Client } from "@/db/schema";
@@ -9,13 +8,14 @@ import { allowedBuIds } from "@/lib/access";
 import { isAdmin, type SessionUser } from "@/lib/auth";
 import { activeBusinessUnits, activeGroups, activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES, INDUSTRIES } from "@/lib/queries";
 
-/** `limited`: the editor can fill in details but not change the account owner or business units. */
-export async function ClientForm({ me, client, buIds = [], limited = false }: { me: SessionUser; client?: Client; buIds?: number[]; limited?: boolean }) {
+/** `limited`: the editor can fill in details but not change the account owner or business unit. */
+export async function ClientForm({ me, client, limited = false }: { me: SessionUser; client?: Client; limited?: boolean }) {
   const [users, groups, allBus] = await Promise.all([activeUsers(), activeGroups(), activeBusinessUnits()]);
-  // Only the person's own business units can be ticked; other units already on the client are kept on save.
+  // A client can be put only in one of the person's own units, and moved only out of one of them.
   const allowed = allowedBuIds(me, allBus.map((b) => b.id));
   const bus = allBus.filter((b) => allowed.includes(b.id));
-  const otherBus = allBus.filter((b) => buIds.includes(b.id) && !allowed.includes(b.id));
+  const current = client ? allBus.find((b) => b.id === client.businessUnitId) : undefined;
+  const fixed = limited || (!!client && !allowed.includes(client.businessUnitId));
   return (
     <ActionForm action={saveClient} className="card p-6">
       {client && <input type="hidden" name="id" value={client.id} />}
@@ -104,26 +104,31 @@ export async function ClientForm({ me, client, buIds = [], limited = false }: { 
             </select>
           </Field>
         )}
-        <div className="md:col-span-2">
-          <span className="label">Relevant business units *</span>
-          {limited ? (
+        {fixed ? (
+          <div>
+            <span className="label">Business unit</span>
             <p className="text-sm text-slate-700">
-              {allBus
-                .filter((b) => buIds.includes(b.id))
-                .map((b) => b.name)
-                .join(", ") || "—"}
-              <span className="block text-xs text-slate-500">Only an Admin, the account owner or their manager can change these.</span>
+              {current?.name ?? "—"}
+              <span className="block text-xs text-slate-500">
+                {limited ? "Only an Admin, the account owner or their manager can change it." : "Only someone in this unit can move the client to another unit."}
+              </span>
             </p>
-          ) : (
-            <>
-              <CheckboxList name="businessUnitIds" options={bus.map((b) => ({ id: b.id, label: b.name }))} selected={!client && bus.length === 1 ? [bus[0].id] : buIds} />
-              <p className="mt-1 text-xs text-slate-500">
-                Only people in these business units can see this client.
-                {otherBus.length > 0 && <> Also shared with {otherBus.map((b) => b.name).join(", ")} (kept as is).</>}
-              </p>
-            </>
-          )}
-        </div>
+          </div>
+        ) : (
+          <Field
+            label="Business unit *"
+            hint={client ? "Only people in this unit see the client. Moving it also moves its bids." : "Only people in this unit see the client. Its code is made from this unit."}
+          >
+            <select name="businessUnitId" className="input" defaultValue={client?.businessUnitId ?? (bus.length === 1 ? bus[0].id : "")} required>
+              {bus.length !== 1 && <option value="">Select…</option>}
+              {bus.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className="md:col-span-2">
           <Field label="Notes">
             <textarea name="notes" className="input" rows={3} defaultValue={client?.notes ?? ""} />

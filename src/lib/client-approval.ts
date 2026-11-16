@@ -41,8 +41,7 @@ async function approversOf(clientId: number, addedById: number) {
   const res = await db.execute<{ id: number; email: string; full_name: string }>(sql`
     select u.id, u.email, u.full_name from users u, clients cl
     where cl.id = ${clientId} and u.status = 'ACTIVE' and u.role <> 'SUPER_ADMIN' and u.id <> ${addedById} and (
-      (u.role = 'ADMIN' and exists (select 1 from user_business_units ub join client_business_units cb on cb.business_unit_id = ub.business_unit_id
-                                    where ub.user_id = u.id and cb.client_id = cl.id))
+      (u.role = 'ADMIN' and exists (select 1 from user_business_units ub where ub.user_id = u.id and ub.business_unit_id = cl.business_unit_id))
       or u.id in (select um.manager_id from user_managers um where um.user_id in (cl.created_by_id, cl.account_owner_id))
     )`);
   return res.rows.map((r) => ({ id: Number(r.id), email: r.email, fullName: r.full_name }));

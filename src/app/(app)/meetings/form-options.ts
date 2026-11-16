@@ -20,9 +20,9 @@ export type MeetingFormOptions = Awaited<ReturnType<typeof meetingFormOptions>>;
  */
 export async function meetingFormOptions(me: SessionUser, currentClientId?: number | null) {
   const visible = clientVisibleTo(me);
-  const [clients, contacts, cbus, users, groups, bus] = await Promise.all([
+  const [clients, contacts, users, groups, bus] = await Promise.all([
     db
-      .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, accountGroupId: schema.clients.accountGroupId })
+      .select({ id: schema.clients.id, name: schema.clients.name, country: schema.clients.country, city: schema.clients.city, accountGroupId: schema.clients.accountGroupId, buId: schema.clients.businessUnitId })
       .from(schema.clients)
       .where(and(ne(schema.clients.status, "INACTIVE"), currentClientId && visible ? or(visible, eq(schema.clients.id, currentClientId)) : visible))
       .orderBy(asc(schema.clients.name)),
@@ -31,7 +31,6 @@ export async function meetingFormOptions(me: SessionUser, currentClientId?: numb
       .from(schema.clientContacts)
       .where(contactVisibleTo(me))
       .orderBy(asc(schema.clientContacts.name)),
-    db.select().from(schema.clientBusinessUnits),
     activeUsers(),
     activeGroups(),
     activeBusinessUnits(),
@@ -41,7 +40,7 @@ export async function meetingFormOptions(me: SessionUser, currentClientId?: numb
     name: c.name,
     location: [c.city, c.country].filter(Boolean).join(", "),
     accountGroupId: c.accountGroupId,
-    buIds: cbus.filter((b) => b.clientId === c.id).map((b) => b.businessUnitId),
+    buIds: [c.buId],
     contacts: contacts.filter((x) => x.clientId === c.id).map(({ id, name, designation, email }) => ({ id, name, designation, hasEmail: !!email?.trim() })),
   }));
   const allowed = allowedBuIds(me, bus.map((b) => b.id));

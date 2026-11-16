@@ -71,8 +71,8 @@ async function externalAttendees(meetingId: number): Promise<External[]> {
   return [...map.values()];
 }
 
-/** Sends the meeting invite / update / cancellation (with .ics) to the given users and outside attendees. */
-export async function notifyMeeting(
+/** Sends the meeting invite / update / cancellation (with .ics) to the given users and outside attendees. Not exported: this is a "use server" file. */
+async function notifyMeeting(
   meetingId: number,
   userIds: number[],
   method: "REQUEST" | "CANCEL",
@@ -217,18 +217,16 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     if (clientField === "new") {
       const name = await assertClientName(req(fd, "newClientName", "New client name"), { confirmed: fd.get("confirmDifferent") === "on" });
       const country = req(fd, "newClientCountry", "New client country");
+      // The new client belongs to one unit: the person's primary unit if the meeting is for it, else the first
+      // of the meeting's units they're in, else their primary unit.
+      const [u] = await db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, me.id));
+      const mine = isSuperAdmin(me) ? buIds : buIds.filter((b) => me.buIds.includes(b));
+      const businessUnitId = u && (mine.includes(u.bu) || !mine.length) ? u.bu : mine[0];
       const [c] = await db
         .insert(schema.clients)
-        .values({ name, country, type: "PROSPECT", status: isAdmin(me) ? "ACTIVE" : "PENDING_REVIEW", createdById: me.id })
+        .values({ name, country, businessUnitId, type: "PROSPECT", status: isAdmin(me) ? "ACTIVE" : "PENDING_REVIEW", createdById: me.id })
         .returning();
       clientId = c.id;
-      // The new client belongs to the meeting's business units (or the person's primary unit).
-      const clientBus = isSuperAdmin(me) ? buIds : buIds.filter((b) => me.buIds.includes(b));
-      if (!clientBus.length) {
-        const [u] = await db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, me.id));
-        if (u) clientBus.push(u.bu);
-      }
-      if (clientBus.length) await db.insert(schema.clientBusinessUnits).values(clientBus.map((businessUnitId) => ({ clientId: c.id, businessUnitId })));
       await audit(me.id, "CLIENT_CREATED", "client", c.id, { name, from: "meeting form" });
       await systemLogClientAdded(c.id, me.id, name, "from the meeting form");
       if (c.status === "PENDING_REVIEW") await notifyClientPending(c.id, me);

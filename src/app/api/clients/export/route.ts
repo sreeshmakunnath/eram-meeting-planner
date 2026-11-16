@@ -6,20 +6,23 @@ import { authOptions } from "@/lib/auth";
 import { BD_STAGE_LABELS } from "@/lib/queries";
 
 const cell = (v: unknown) => {
-  const s = v == null ? "" : String(v);
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`; // Excel would treat it as a formula
+
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 
 /** CSV export of the client master (opens in Excel). */
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.id || (session as { inactive?: boolean }).inactive) return new Response("Unauthorized", { status: 401 });
   const status = new URL(req.url).searchParams.get("status") ?? "ACTIVE";
   const { clients, users } = schema;
   const rows = await db
     .select({
       clientCode: clients.clientCode,
       name: clients.name,
+      unit: schema.businessUnits.name,
       shortCode: clients.shortCode,
       type: clients.type,
       industry: clients.industry,
@@ -31,12 +34,13 @@ export async function GET(req: Request) {
       owner: users.fullName,
     })
     .from(clients)
+    .innerJoin(schema.businessUnits, eq(clients.businessUnitId, schema.businessUnits.id))
     .leftJoin(users, eq(clients.accountOwnerId, users.id))
     .where(and(clientVisibleTo(session.user), status === "ALL" ? undefined : eq(clients.status, status as "ACTIVE" | "INACTIVE" | "PENDING_REVIEW")))
     .orderBy(asc(clients.name));
-  const header = ["Client code", "Client", "Short code", "Type", "Industry", "Country", "City", "Website", "BD stage", "Status", "Account owner"];
+  const header = ["Client code", "Client", "Business unit", "Short code", "Type", "Industry", "Country", "City", "Website", "BD stage", "Status", "Account owner"];
   const lines = rows.map((r) =>
-    [r.clientCode, r.name, r.shortCode, r.type, r.industry, r.country, r.city, r.website, r.bdStage ? BD_STAGE_LABELS[r.bdStage] : "", r.status, r.owner]
+    [r.clientCode, r.name, r.unit, r.shortCode, r.type, r.industry, r.country, r.city, r.website, r.bdStage ? BD_STAGE_LABELS[r.bdStage] : "", r.status, r.owner]
       .map(cell)
       .join(","),
   );

@@ -29,7 +29,7 @@ export const CLIENT_IMPORT_COLUMNS: { key: ClientField; header: string; aliases:
   { key: "country", header: "Country *", aliases: ["country"], width: 16, max: 100, help: "Required for new clients." },
   { key: "city", header: "City", aliases: ["city", "location"], width: 16, max: 100, help: "" },
   { key: "website", header: "Website", aliases: ["website", "web", "url"], width: 26, max: 200, help: "https:// is added if missing." },
-  { key: "businessUnits", header: "Business units", aliases: ["businessunits", "businessunit", "bu", "bus"], width: 26, help: "One or more, separated by ; e.g. Eram Engineering; Eram Trading." },
+  { key: "businessUnits", header: "Business unit", aliases: ["businessunit", "businessunits", "bu", "bus"], width: 26, help: "The one unit the client belongs to, e.g. Eram Engineering. Used for new clients; existing clients stay in their unit." },
   { key: "bdStage", header: "BD stage", aliases: ["bdstage", "stage"], width: 14, help: "Research, MIR, Approach, Follow-up or Active client." },
   { key: "targetBatch", header: "Target batch", aliases: ["targetbatch", "batch"], width: 14, max: 50, help: "e.g. Batch 1, for the BD Target Schedule." },
   { key: "owner", header: "Account owner", aliases: ["accountowner", "owner"], width: 24, help: "A user's email, username or full name." },

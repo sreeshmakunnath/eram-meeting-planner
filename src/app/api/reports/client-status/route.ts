@@ -8,7 +8,7 @@ import { BD_STAGE_LABELS } from "@/lib/queries";
 
 export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
-  if (!session?.user?.id) return new Response("Unauthorized", { status: 401 });
+  if (!session?.user?.id || (session as { inactive?: boolean }).inactive) return new Response("Unauthorized", { status: 401 });
   const p = new URL(req.url).searchParams;
   const rows = (await clientStatusRows(scopeToBu(session.user, Number(p.get("bu"))) ?? session.user))
     .filter((r) => !p.get("flag") || r.flag === p.get("flag"))

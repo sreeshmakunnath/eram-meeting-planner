@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Badge, Empty, fmtDateTime, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { countActive, FilterBar, FilterField } from "@/components/filters";
-import { userInMyBus } from "@/lib/access";
+import { userInMyBus, userWithinMyBus } from "@/lib/access";
 import { isSuperAdmin, requireAdmin } from "@/lib/auth";
 import { activeBusinessUnits } from "@/lib/queries";
 
@@ -38,6 +38,10 @@ export default async function UsersPage(props: { searchParams: Promise<Search> }
         businessUnit: businessUnits.name,
         otherUnits: sql<string>`(select string_agg(b.name, ', ' order by b.name) from user_business_units ub join business_units b on b.id = ub.business_unit_id where ub.user_id = ${users.id} and ub.business_unit_id <> ${users.businessUnitId})`.mapWith(String),
         groupCount: sql<number>`(select count(*) from group_members gm where gm.user_id = ${users.id})`.mapWith(Number),
+        // Admins manage only users wholly within their units (and never Super Admins)
+        manageable: isSuperAdmin(me)
+          ? sql<boolean>`true`
+          : sql<boolean>`(${users.role} <> 'SUPER_ADMIN' and ${userWithinMyBus(me, users.id)})`.mapWith(Boolean),
       })
       .from(users)
       .leftJoin(businessUnits, eq(users.businessUnitId, businessUnits.id))
@@ -108,9 +112,15 @@ export default async function UsersPage(props: { searchParams: Promise<Search> }
               {rows.map((u) => (
                 <tr key={u.id} className="hover:bg-slate-50">
                   <td>
-                    <Link href={`/admin/users/${u.id}`} className="link">
-                      {u.fullName}
-                    </Link>
+                    {u.manageable ? (
+                      <Link href={`/admin/users/${u.id}`} className="link">
+                        {u.fullName}
+                      </Link>
+                    ) : (
+                      <span className="font-medium text-slate-700" title="Also has access to business units you don't administer: managed by a Super Admin">
+                        {u.fullName} <span className="text-xs font-normal text-slate-400">· managed by a Super Admin</span>
+                      </span>
+                    )}
                     {u.designation && <div className="text-xs text-slate-500">{u.designation}</div>}
                   </td>
                   <td>

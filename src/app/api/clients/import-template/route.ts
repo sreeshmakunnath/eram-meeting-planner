@@ -9,7 +9,7 @@ import { BD_STAGE_LABELS, BD_STAGES, INDUSTRIES } from "@/lib/queries";
 /** Empty client import sheet with dropdowns for the fixed lists. Admins only. */
 export async function GET() {
   const session = await getServerSession(authOptions);
-  if (session?.user?.role !== "ADMIN" && session?.user?.role !== "SUPER_ADMIN") return new Response("Admins only", { status: 403 });
+  if ((session as { inactive?: boolean } | null)?.inactive || (session?.user?.role !== "ADMIN" && session?.user?.role !== "SUPER_ADMIN")) return new Response("Admins only", { status: 403 });
 
   const [bus, users] = await Promise.all([
     db.select({ name: schema.businessUnits.name }).from(schema.businessUnits).where(eq(schema.businessUnits.active, true)).orderBy(asc(schema.businessUnits.name)),
@@ -19,7 +19,7 @@ export async function GET() {
     type: { title: "Type", values: ["Client", "Prospect", "Partner", "Vendor"], strict: true },
     bdStage: { title: "BD stage", values: BD_STAGES.map((s) => BD_STAGE_LABELS[s]), strict: true },
     status: { title: "Status", values: ["Active", "Inactive", "Pending review"], strict: true },
-    businessUnits: { title: "Business units", values: bus.map((b) => b.name), strict: false }, // several can be typed with ;
+    businessUnits: { title: "Business units", values: bus.map((b) => b.name), strict: true },
     owner: { title: "Account owner", values: users.map((u) => u.email), strict: false }, // a name or username works too
     industry: { title: "Industry (suggestions)", values: INDUSTRIES, strict: false },
   };

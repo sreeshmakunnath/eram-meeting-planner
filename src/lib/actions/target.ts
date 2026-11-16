@@ -78,6 +78,8 @@ const STATUS: Record<string, TaskStatus> = {
 /** Imports the "BD Target Companies – Batch N Schedule" sheet into clients + BD tasks. Re-running updates instead of duplicating. */
 export async function importTargetSchedule(_: TargetImportResult | undefined, fd: FormData): Promise<TargetImportResult> {
   const admin = await requireSuperAdmin();
+  // New clients from the schedule go in the importer's primary business unit
+  const [{ bu: adminBu }] = await db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, admin.id));
   const file = fd.get("file");
   if (!(file instanceof File) || file.size === 0) return { error: "Choose an .xlsx file." };
   const wb = new ExcelJS.Workbook();
@@ -126,7 +128,7 @@ export async function importTargetSchedule(_: TargetImportResult | undefined, fd
       const loc = text(get(row, "location")).split(",").map((x) => x.trim()).filter(Boolean);
       const [c] = await db
         .insert(schema.clients)
-        .values({ name, country: loc.at(-1) || "Saudi Arabia", city: loc.length > 1 ? loc[0] : null, type: "PROSPECT", bdStage: "RESEARCH", createdById: admin.id })
+        .values({ name, country: loc.at(-1) || "Saudi Arabia", city: loc.length > 1 ? loc[0] : null, businessUnitId: adminBu, type: "PROSPECT", bdStage: "RESEARCH", createdById: admin.id })
         .returning({ id: schema.clients.id, name: schema.clients.name });
       clients.push(c);
       client = c;
