@@ -190,6 +190,13 @@
       "when": 1794807883582,
       "tag": "0026_bid_team",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794835427547,
+      "tag": "0027_account_owner_in_unit",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,5 @@
 "use server";
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, notInArray } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActionState } from "@/components/action-form";
@@ -164,6 +164,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     const saveManagers = await setManagers(id, ints(fd, "managerIds"));
     await db.update(schema.users).set({ ...data, updatedById: admin.id }).where(eq(schema.users.id, id));
     await setBusinessUnits(id, buIds);
+    const released = await releaseOutsideUnits(admin.id, id, buIds);
     const managersChanged = await saveManagers(id);
     if (password) {
       // A new password also clears any lockout so the user can sign in with it right away.
@@ -176,7 +177,8 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     if (managersChanged) changed.push("managers");
     await audit(admin.id, "USER_UPDATED", "user", id, { changed, groupsAdded: groups.added, groupsRemoved: groups.removed });
     revalidatePath("/admin/users");
-    return { ok: password ? "User saved and password changed." : "User saved." };
+    const note = released.length ? ` They're no longer account owner of ${released.join(", ")} (outside their business units).` : "";
+    return { ok: (password ? "User saved and password changed." : "User saved.") + note };
   } catch (e) {
     return toFormError(e);
   }
@@ -254,4 +256,25 @@ async function tellUnitsToTransfer(userId: number, bids: { id: number; businessU
     await notify(admins.map((a) => a.id), { kind: "BIDS_TO_TRANSFER", title: "Open bids to transfer", body: body(n), href: `/admin/users/${userId}` });
   }
   await notify(supers, { kind: "BIDS_TO_TRANSFER", title: "Open bids to transfer", body: body(bids.length), href: `/admin/users/${userId}` });
+}
+
+/**
+ * After a user's units change: they stop being account owner of clients outside their units (an account owner
+ * must belong to the client's unit) and leave the bid teams of bids outside them. Returns the clients released.
+ */
+async function releaseOutsideUnits(actorId: number, userId: number, buIds: number[]) {
+  const c = schema.clients;
+  const outside = buIds.length ? notInArray(c.businessUnitId, buIds) : undefined;
+  const cleared = await db
+    .update(c)
+    .set({ accountOwnerId: null })
+    .where(and(eq(c.accountOwnerId, userId), outside))
+    .returning({ id: c.id, name: c.name });
+  for (const cl of cleared) await audit(actorId, "CLIENT_UPDATED", "client", cl.id, { name: cl.name, changed: ["accountOwnerId"], reason: "Account owner left the client's business unit" });
+  const outsideBids = db
+    .select({ id: schema.bids.id })
+    .from(schema.bids)
+    .where(buIds.length ? notInArray(schema.bids.businessUnitId, buIds) : undefined);
+  await db.delete(schema.bidTeam).where(and(eq(schema.bidTeam.userId, userId), inArray(schema.bidTeam.bidId, outsideBids)));
+  return cleared.map((x) => x.name);
 }

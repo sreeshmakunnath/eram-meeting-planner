@@ -4,6 +4,7 @@ import { ClientNameField } from "@/components/client-name-field";
 import { Field, labelize } from "@/components/ui";
 import type { Client } from "@/db/schema";
 import { saveClient } from "@/lib/actions/clients";
+import { UnitOwnerFields } from "./unit-owner-fields";
 import { allowedBuIds } from "@/lib/access";
 import { isAdmin, type SessionUser } from "@/lib/auth";
 import { activeBusinessUnits, activeGroups, activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES, INDUSTRIES } from "@/lib/queries";
@@ -75,16 +76,16 @@ export async function ClientForm({ me, client, limited = false }: { me: SessionU
             <option value="Batch 3" />
           </datalist>
         </Field>
-        <Field label="Account owner" hint={limited ? "Only an Admin, the account owner or their manager can change this." : "Main ERAM contact for this client."}>
-          <select name="accountOwnerId" className="input" defaultValue={client?.accountOwnerId ?? ""} disabled={limited}>
-            <option value="">—</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>
-                {u.fullName}
-              </option>
-            ))}
-          </select>
-        </Field>
+        <UnitOwnerFields
+          units={bus.map((b) => ({ id: b.id, name: b.name }))}
+          defaultUnitId={client?.businessUnitId ?? (bus.length === 1 ? bus[0].id : null)}
+          fixedUnit={fixed ? { id: client?.businessUnitId ?? 0, name: current?.name ?? "—" } : null}
+          fixedHint={limited ? "Only an Admin, the account owner or their manager can change it." : "Only someone in this unit can move the client to another unit."}
+          unitHint={client ? "Only people in this unit see the client. Moving it also moves its bids." : "Only people in this unit see the client. Its code is made from this unit."}
+          owners={users.map((u) => ({ id: u.id, name: u.fullName, buIds: u.buIds }))}
+          defaultOwnerId={client?.accountOwnerId ?? null}
+          ownerLocked={limited}
+        />
         <Field label="Account group" hint="Suggested attendees for this client's meetings.">
           <select name="accountGroupId" className="input" defaultValue={client?.accountGroupId ?? ""}>
             <option value="">—</option>
@@ -101,31 +102,6 @@ export async function ClientForm({ me, client, limited = false }: { me: SessionU
               <option value="ACTIVE">Active</option>
               <option value="INACTIVE">Inactive (hidden from dropdowns)</option>
               <option value="PENDING_REVIEW">Pending review</option>
-            </select>
-          </Field>
-        )}
-        {fixed ? (
-          <div>
-            <span className="label">Business unit</span>
-            <p className="text-sm text-slate-700">
-              {current?.name ?? "—"}
-              <span className="block text-xs text-slate-500">
-                {limited ? "Only an Admin, the account owner or their manager can change it." : "Only someone in this unit can move the client to another unit."}
-              </span>
-            </p>
-          </div>
-        ) : (
-          <Field
-            label="Business unit *"
-            hint={client ? "Only people in this unit see the client. Moving it also moves its bids." : "Only people in this unit see the client. Its code is made from this unit."}
-          >
-            <select name="businessUnitId" className="input" defaultValue={client?.businessUnitId ?? (bus.length === 1 ? bus[0].id : "")} required>
-              {bus.length !== 1 && <option value="">Select…</option>}
-              {bus.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
             </select>
           </Field>
         )}

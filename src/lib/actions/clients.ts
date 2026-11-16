@@ -38,7 +38,7 @@ function readClient(fd: FormData) {
 
 /**
  * The account owner sees every bid of the client, so they must be an active member of the client's unit.
- * Checked when the owner or the unit changes (an existing owner is left alone otherwise).
+ * Checked on every save by someone who may set the owner, and whenever the owner or the unit changes.
  */
 async function checkAccountOwner(ownerId: number | null | undefined, buId: number) {
   if (ownerId && !(await isActiveMemberOf(ownerId, buId))) throw new FormError("The account owner must be an active member of the client's business unit.");
@@ -79,7 +79,7 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       const movable = full && (isSuperAdmin(me) || me.buIds.includes(before.businessUnitId));
       const businessUnitId = movable ? await pickedUnit(me, fd) : before.businessUnitId;
       const moved = businessUnitId !== before.businessUnitId;
-      if (moved || data.accountOwnerId !== before.accountOwnerId) await checkAccountOwner(data.accountOwnerId, businessUnitId);
+      if (full || moved || data.accountOwnerId !== before.accountOwnerId) await checkAccountOwner(data.accountOwnerId, businessUnitId);
       const status = isAdmin(me) && requested && CLIENT_STATUSES.includes(requested) ? requested : before.status;
       const changed: string[] = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
       if (moved) changed.push("businessUnitId");
