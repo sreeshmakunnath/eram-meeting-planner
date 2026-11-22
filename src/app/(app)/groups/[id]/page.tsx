@@ -1,9 +1,10 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Badge, Empty, fmtDate, labelize, Notice, PageHeader } from "@/components/ui";
 import { db, schema } from "@/db";
 import { deleteGroup } from "@/lib/actions/groups";
+import { clientVisibleTo } from "@/lib/access";
 import { isAdmin, requireUser } from "@/lib/auth";
 import { listMeetings } from "@/lib/meeting-queries";
 import { listTasks } from "@/lib/task-queries";
@@ -18,10 +19,16 @@ export default async function GroupPage(props: { params: Promise<{ id: string }>
   const group = Number.isInteger(id)
     ? await db.query.groups.findFirst({
         where: eq(schema.groups.id, id),
-        with: { lead: { columns: { fullName: true } }, clients: { columns: { id: true, name: true } } },
+        with: { lead: { columns: { fullName: true } } },
       })
     : undefined;
   if (!group) notFound();
+  // Only the group's clients this person may see (a group can work for clients in several units)
+  const clients = await db
+    .select({ id: schema.clients.id, name: schema.clients.name })
+    .from(schema.clients)
+    .where(and(eq(schema.clients.accountGroupId, id), clientVisibleTo(me)))
+    .orderBy(asc(schema.clients.name));
   const members = await db
     .select({
       id: schema.users.id,
@@ -91,9 +98,9 @@ export default async function GroupPage(props: { params: Promise<{ id: string }>
         <div className="space-y-6">
           <section className="card p-4">
             <h2 className="mb-2 font-semibold text-navy">Client accounts</h2>
-            {group.clients.length ? (
+            {clients.length ? (
               <ul className="space-y-1 text-sm">
-                {group.clients.map((c) => (
+                {clients.map((c) => (
                   <li key={c.id}>
                     <Link href={`/clients/${c.id}`} className="link">
                       {c.name}

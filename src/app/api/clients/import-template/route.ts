@@ -19,7 +19,7 @@ export async function GET() {
     type: { title: "Type", values: ["Client", "Prospect", "Partner", "Vendor"], strict: true },
     bdStage: { title: "BD stage", values: BD_STAGES.map((s) => BD_STAGE_LABELS[s]), strict: true },
     status: { title: "Status", values: ["Active", "Inactive", "Pending review"], strict: true },
-    businessUnits: { title: "Business units", values: bus.map((b) => b.name), strict: true },
+    businessUnits: { title: "Business unit", values: bus.map((b) => b.name), strict: true },
     owner: { title: "Account owner", values: users.map((u) => u.email), strict: false }, // a name or username works too
     industry: { title: "Industry (suggestions)", values: INDUSTRIES, strict: false },
   };
@@ -32,10 +32,10 @@ export async function GET() {
       "",
       "• One row per contact. For a client with three contacts, use three rows and repeat the client name; client details can stay empty on the extra rows.",
       "• Client and Country are required for new clients (dark blue headers). Everything else is optional.",
-      "• Clients already in the planner (same name, any capitals) are updated: filled-in cells overwrite, empty cells leave the current value. New contacts and business units are added, never removed.",
+      "• Clients already in the planner (same name, any capitals) are updated: filled-in cells overwrite, empty cells leave the current value. New contacts are added, never removed; an existing client stays in its business unit.",
       '• Names that look like an existing client ("Sabbic" vs "SABIC", "L & T" vs "Larsen & Toubro (L&T)") are held back as possible duplicates. Fix the name, or tick "Import near-matches as new clients".',
-      "• Business units: pick from the list, or type several separated by ; (e.g. Eram Engineering; Eram Trading).",
-      "• Account owner: a user's email (dropdown), username or full name.",
+      "• Business unit: the one unit the client belongs to, picked from the list. It is used for new clients.",
+      "• Account owner: a user's email (dropdown), username or full name. They must be a member of the client's business unit.",
       "• Hover over a header for a hint. The Lists sheet shows the allowed values.",
       "• In the planner, use Check file first: it reports every problem without saving anything.",
     ],

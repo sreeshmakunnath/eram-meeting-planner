@@ -2,16 +2,21 @@
 // else sees clients (and through them meetings) of the business units they're assigned to, plus clients they
 // own or created.
 import { and, eq, exists, inArray, isNull, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
-import type { AnyPgColumn } from "drizzle-orm/pg-core";
+import { alias, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { db, schema } from "@/db";
 import { isAdmin, isSuperAdmin, type SessionUser } from "./auth";
 
 const one = { one: sql`1` };
 
-/** The client (by id column) belongs to one of the user's business units. */
+/**
+ * The client (by id column) belongs to one of the user's business units. The subquery uses its own alias: the
+ * caller's column is often clients.id itself, and an unaliased "clients" inside would bind to the subquery's own
+ * row (true for every client as soon as one client is in my units).
+ */
+const unitClient = alias(schema.clients, "unit_client");
 export const clientInMyBus = (me: SessionUser, clientId: AnyPgColumn) =>
   me.buIds.length
-    ? exists(db.select(one).from(schema.clients).where(and(eq(schema.clients.id, clientId), inArray(schema.clients.businessUnitId, me.buIds))))
+    ? exists(db.select(one).from(unitClient).where(and(eq(unitClient.id, clientId), inArray(unitClient.businessUnitId, me.buIds))))
     : sql`false`;
 
 /** The user (by id column) shares at least one business unit with me. */

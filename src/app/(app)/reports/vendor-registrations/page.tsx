@@ -145,6 +145,11 @@ export default async function VendorRegistrationReport(props: { searchParams: Pr
                 ))}
               </div>
             )}
+            {admin && (
+              <Link href="/reports/vendor-registrations/import" className="btn-secondary print:hidden">
+                Import
+              </Link>
+            )}
             <PdfButton title="Vendor registrations" />
           </>
         }
