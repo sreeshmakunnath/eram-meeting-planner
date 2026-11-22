@@ -60,13 +60,32 @@ async function setBusinessUnits(userId: number, ids: number[]) {
   await db.insert(schema.userBusinessUnits).values(ids.map((businessUnitId) => ({ userId, businessUnitId })));
 }
 
-/** Replaces the user's reporting managers. Nobody can manage themselves or someone above them (no loops). */
-async function setManagers(userId: number | null, managerIds: number[]) {
+/**
+ * Replaces the user's reporting managers. Nobody can manage themselves or someone above them (no loops).
+ * Managers see the user's bids, so a BU Admin may only add managers who share one of the user's units
+ * (managers already on the list, e.g. set by a Super Admin, may stay).
+ */
+async function setManagers(actor: SessionUser, userId: number | null, managerIds: number[], buIds: number[]) {
   const ids = [...new Set(managerIds)];
   if (userId) {
     if (ids.includes(userId)) throw new FormError("A user can't be their own reporting manager.");
     const below = await teamIds(userId);
     if (ids.some((m) => below.includes(m))) throw new FormError("A manager can't be someone who reports to this user.");
+  }
+  if (!isSuperAdmin(actor) && ids.length) {
+    const kept = userId ? (await db.select().from(schema.userManagers).where(eq(schema.userManagers.userId, userId))).map((r) => r.managerId) : [];
+    const added = ids.filter((m) => !kept.includes(m));
+    if (added.length) {
+      const ok = buIds.length
+        ? (
+            await db
+              .selectDistinct({ id: schema.userBusinessUnits.userId })
+              .from(schema.userBusinessUnits)
+              .where(and(inArray(schema.userBusinessUnits.userId, added), inArray(schema.userBusinessUnits.businessUnitId, buIds)))
+          ).map((r) => r.id)
+        : [];
+      if (added.some((m) => !ok.includes(m))) throw new FormError("Reporting managers must belong to one of this user's business units. A Super Admin can set others.");
+    }
   }
   return async (id: number) => {
     const before = (await db.select().from(schema.userManagers).where(eq(schema.userManagers.userId, id))).map((r) => r.managerId);
@@ -127,7 +146,7 @@ export async function createUser(_: ActionState, fd: FormData): Promise<ActionSt
     const admin = await requireAdmin();
     const data = readUser(fd, admin);
     const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, null);
-    const saveManagers = await setManagers(null, ints(fd, "managerIds"));
+    const saveManagers = await setManagers(admin, null, ints(fd, "managerIds"), buIds);
     const password = readPassword(fd);
     passwordSet = !!password;
     const [user] = await db
@@ -161,7 +180,7 @@ export async function updateUser(_: ActionState, fd: FormData): Promise<ActionSt
     if (id === admin.id && data.role !== admin.role) throw new FormError("You can't change your own role.");
     const buBefore = await userBuIds(id);
     const buIds = await readBusinessUnits(fd, admin, data.businessUnitId, id);
-    const saveManagers = await setManagers(id, ints(fd, "managerIds"));
+    const saveManagers = await setManagers(admin, id, ints(fd, "managerIds"), buIds);
     await db.update(schema.users).set({ ...data, updatedById: admin.id }).where(eq(schema.users.id, id));
     await setBusinessUnits(id, buIds);
     const released = await releaseOutsideUnits(admin.id, id, buIds);

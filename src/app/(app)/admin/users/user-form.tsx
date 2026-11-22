@@ -35,9 +35,12 @@ export async function UserForm({
     ? await db.select().from(schema.businessUnits).where(eq(schema.businessUnits.id, user.businessUnitId))
     : [];
   const buOptions = [...bus, ...current.map((b) => ({ ...b, name: b.active ? b.name : `${b.name} (inactive)` }))];
-  // Reporting managers: people in the Admin's units (plus the current managers), never the user or anyone under them
+  // Reporting managers: people who share one of the user's units (for a new user, one of the Admin's), plus the
+  // current managers; never the user or anyone under them. Managers see the user's bids, so only a Super Admin
+  // may pick someone from another unit.
   const below = user ? await teamIds(user.id) : [];
-  const managers = (isSuperAdmin(me) ? allUsers : allUsers.filter((u) => u.buIds.some((b) => me.buIds.includes(b)) || managerIds.includes(u.id))).filter(
+  const sameUnits = user && buIds.length ? buIds : me.buIds;
+  const managers = (isSuperAdmin(me) ? allUsers : allUsers.filter((u) => u.buIds.map(Number).some((b) => sameUnits.includes(b)) || managerIds.includes(u.id))).filter(
     (u) => u.id !== user?.id && !below.includes(u.id),
   );
   return (
@@ -92,7 +95,7 @@ export async function UserForm({
         <div className="md:row-span-2">
           <span className="label">Reporting managers</span>
           <CheckboxList name="managerIds" options={managers.map((u) => ({ id: u.id, label: u.fullName }))} selected={managerIds} empty="No one to pick yet." />
-          <p className="mt-1 text-xs text-slate-500">One or more. Managers see this person&apos;s tasks and meetings (and those of anyone under them).</p>
+          <p className="mt-1 text-xs text-slate-500">One or more. Managers see this person&apos;s tasks, meetings and bids (and those of anyone under them).{!isSuperAdmin(me) && " Only people in this user's business units can be picked."}</p>
         </div>
         <Field
           label={user ? "New password" : "Password"}
