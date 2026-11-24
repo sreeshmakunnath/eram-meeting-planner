@@ -10,7 +10,7 @@ export function ClientTags({ vendorCode, otherUnits }: { vendorCode: string | nu
       )}
       {otherUnits && (
         <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-900 ring-1 ring-amber-200" title="The same company is a client of other business units: they compete for it. Only Super Admins see this.">
-          Also in {otherUnits} · competition
+          Also in {otherUnits}
         </span>
       )}
     </span>
