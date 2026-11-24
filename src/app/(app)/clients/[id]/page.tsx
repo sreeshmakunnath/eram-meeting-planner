@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, ne } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -14,6 +14,7 @@ import { listTasks } from "@/lib/task-queries";
 import { TaskMiniList } from "@/components/task-mini-list";
 import { fmtDay, fmtPlainDate, fmtTime, STATUS_LABEL, STATUS_TONE, TYPE_LABEL } from "@/lib/meetings";
 import { isSimilar } from "@/lib/similar";
+import { ClientTags } from "@/components/client-tags";
 import { logsFor } from "@/lib/daily-log";
 import { LogForm } from "../../log/log-form";
 import { LogList } from "../../log/log-list";
@@ -150,7 +151,8 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
       ? await db
           .select({ id: schema.clients.id, name: schema.clients.name })
           .from(schema.clients)
-          .where(and(ne(schema.clients.id, id), clientVisibleTo(me)))
+          // Merging only within the client's unit: a client of the same name in another unit is a competitor's
+          .where(and(ne(schema.clients.id, id), eq(schema.clients.businessUnitId, client.businessUnitId), clientVisibleTo(me)))
           .orderBy(asc(schema.clients.name))
       : [];
   const meetings = tab === "meetings" ? await listMeetings(me, { client: String(id), status: "ALL" }) : [];
@@ -162,6 +164,21 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
   const projects = tab === "bids" ? await loadClientProjects(id) : [];
   const editableProjects = projects.filter((p) => editable || p.createdById === me.id);
   const possibleDuplicates = allClients.filter((c) => isSimilar(c.name, client.name));
+  // Super Admins: the same company as a client of other units (competing units), and this unit's vendor status
+  const competing = isSuperAdmin(me)
+    ? await db
+        .select({ id: schema.clients.id, unit: schema.businessUnits.name, code: schema.businessUnits.code })
+        .from(schema.clients)
+        .innerJoin(schema.businessUnits, eq(schema.businessUnits.id, schema.clients.businessUnitId))
+        .where(and(ne(schema.clients.id, id), sql`lower(${schema.clients.name}) = lower(${client.name})`))
+        .orderBy(asc(schema.businessUnits.name))
+    : [];
+  const [vendorDone] = await db
+    .select({ code: schema.vendorRegistrations.vendorCode })
+    .from(schema.vendorRegistrations)
+    .where(and(eq(schema.vendorRegistrations.clientId, id), eq(schema.vendorRegistrations.status, "COMPLETED")))
+    .orderBy(desc(schema.vendorRegistrations.completedAt))
+    .limit(1);
   const activity =
     tab === "activity"
       ? await db
@@ -186,6 +203,7 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
               </span>
             )}
             <Badge tone={statusTone(client.status)}>{labelize(client.status)}</Badge>
+            <ClientTags vendorCode={vendorDone ? (vendorDone.code ?? "") : null} />
             <Link href={`/meetings/new?client=${id}`} className="btn-secondary">
               New meeting
             </Link>
@@ -199,6 +217,20 @@ export default async function ClientPage(props: { params: Promise<{ id: string }
         }
       />
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
+      {competing.length > 0 && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+          <b>Competition between units:</b> this company is also a client of{" "}
+          {competing.map((c, i) => (
+            <span key={c.id}>
+              {i > 0 && ", "}
+              <Link href={`/clients/${c.id}`} className="font-medium underline">
+                {c.unit}
+              </Link>
+            </span>
+          ))}
+          . Each unit has its own record, bids and vendor registration. Only Super Admins see this.
+        </div>
+      )}
 
       {canApprove && (
         <div className="card mb-6 border-amber-200 bg-amber-50/50 p-4">

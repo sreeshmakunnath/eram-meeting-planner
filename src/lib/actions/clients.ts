@@ -62,8 +62,7 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
     const me = await requireUser();
     id = int(fd, "id");
     const data = readClient(fd);
-    const [previous] = id ? await db.select({ name: schema.clients.name }).from(schema.clients).where(eq(schema.clients.id, id)) : [];
-    data.name = await assertClientName(data.name, { excludeId: id, confirmed: fd.get("confirmDifferent") === "on", previousName: previous?.name });
+    const confirmed = fd.get("confirmDifferent") === "on";
 
     const requested = str(fd, "status") as (typeof CLIENT_STATUSES)[number] | null;
     if (id) {
@@ -79,6 +78,8 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       const movable = full && (isSuperAdmin(me) || me.buIds.includes(before.businessUnitId));
       const businessUnitId = movable ? await pickedUnit(me, fd) : before.businessUnitId;
       const moved = businessUnitId !== before.businessUnitId;
+      // The name must be free in the client's (new) unit; other units may have their own client of that name
+      data.name = await assertClientName(data.name, { buId: businessUnitId, excludeId: id, confirmed, previousName: before.name, moved });
       if (full || moved || data.accountOwnerId !== before.accountOwnerId) await checkAccountOwner(data.accountOwnerId, businessUnitId);
       const status = isAdmin(me) && requested && CLIENT_STATUSES.includes(requested) ? requested : before.status;
       const changed: string[] = (Object.keys(data) as (keyof typeof data)[]).filter((k) => (data[k] ?? null) !== (before[k] ?? null));
@@ -96,6 +97,7 @@ export async function saveClient(_: ActionState, fd: FormData): Promise<ActionSt
       });
     } else {
       const businessUnitId = await pickedUnit(me, fd);
+      data.name = await assertClientName(data.name, { buId: businessUnitId, confirmed });
       await checkAccountOwner(data.accountOwnerId, businessUnitId);
       // Users' new clients wait for Admin review so duplicates don't build up.
       const status = isAdmin(me) ? (requested && CLIENT_STATUSES.includes(requested) ? requested : "ACTIVE") : "PENDING_REVIEW";
@@ -277,8 +279,12 @@ export async function updateBdStage(clientId: number, fd: FormData) {
   revalidatePath("/reports/client-status");
 }
 
-/** Live name check for the client forms: same name (any case) and similar names. */
-export async function checkClientName(name: string, excludeId?: number | null): Promise<ClientNameMatches> {
-  await requireUser();
-  return clientNameMatches(name, excludeId);
+/**
+ * Live name check for the client forms: same and similar names within the chosen business unit. Only for a
+ * unit the person belongs to (any for a Super Admin), so it can't be used to list other units' clients.
+ */
+export async function checkClientName(name: string, buId: number | null, excludeId?: number | null): Promise<ClientNameMatches> {
+  const me = await requireUser();
+  if (!buId || (!isSuperAdmin(me) && !me.buIds.includes(buId))) return { exact: null, similar: [] };
+  return clientNameMatches(name, buId, excludeId);
 }

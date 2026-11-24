@@ -143,7 +143,7 @@ export const clients = pgTable(
   "clients",
   {
     id: serial("id").primaryKey(),
-    name: varchar("name", { length: 150 }).notNull().unique(),
+    name: varchar("name", { length: 150 }).notNull(),
     shortCode: varchar("short_code", { length: 10 }),
     /**
      * System code such as CL-ENG-0007, for reports shared without client details. Assigned by a database
@@ -170,11 +170,12 @@ export const clients = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  // One client per name, ignoring case: "SABIC" and "sabic" can't both exist.
+  // One client per name and business unit, ignoring case. The same company can be a client of several units
+  // (each with its own record, bids and vendor registration); Super Admins see those as competing units.
   (t) => [
     index("clients_status_idx").on(t.status),
     index("clients_bu_idx").on(t.businessUnitId),
-    uniqueIndex("clients_name_lower_idx").on(sql`lower(${t.name})`),
+    uniqueIndex("clients_name_bu_lower_idx").on(sql`lower(${t.name})`, t.businessUnitId),
   ],
 );
 

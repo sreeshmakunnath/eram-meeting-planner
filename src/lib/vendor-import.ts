@@ -85,7 +85,9 @@ export async function runVendorImport(admin: SessionUser, file: File | null, che
     .from(c)
     .where(isSuperAdmin(admin) ? undefined : admin.buIds.length ? inArray(c.businessUnitId, admin.buIds) : eq(c.id, -1));
   const byCode = new Map(clients.filter((x) => x.code).map((x) => [x.code!.toLowerCase(), x]));
-  const byName = new Map(clients.map((x) => [x.name.toLowerCase(), x]));
+  // A name can exist in several units (one client record each); then only the client code tells them apart
+  const byName = new Map<string, (typeof clients)[number] | null>();
+  for (const x of clients) byName.set(x.name.toLowerCase(), byName.has(x.name.toLowerCase()) ? null : x);
   const [users, members, regs] = await Promise.all([
     db.select({ id: schema.users.id, email: schema.users.email, username: schema.users.username, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
     db.select({ userId: schema.userBusinessUnits.userId, buId: schema.userBusinessUnits.businessUnitId }).from(schema.userBusinessUnits),
@@ -118,7 +120,12 @@ export async function runVendorImport(admin: SessionUser, file: File | null, che
       skipped.push({ row: r, client: label, message: "Client is empty." });
       continue;
     }
-    const client = byCode.get(values.client.toLowerCase()) ?? byName.get(values.client.toLowerCase());
+    const named = byName.get(values.client.toLowerCase());
+    if (!byCode.has(values.client.toLowerCase()) && named === null) {
+      skipped.push({ row: r, client: label, message: "This name is a client of more than one of your business units. Use the client code instead." });
+      continue;
+    }
+    const client = byCode.get(values.client.toLowerCase()) ?? named;
     if (!client) {
       skipped.push({ row: r, client: label, message: isSuperAdmin(admin) ? "No client with that code or name." : "No client with that code or name in your business units." });
       continue;

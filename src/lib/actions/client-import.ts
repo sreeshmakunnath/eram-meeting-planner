@@ -135,8 +135,19 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
       skipped.push({ row: r, client: "—", message: "Client name is empty." });
       continue;
     }
-    const key = name.toLowerCase();
+    // The row's business unit picks the client record: the same company can be a client of several units.
+    // Without a unit on the row: the one client of that name in my units, else my primary unit.
+    const named = values.businessUnits.split(/[;,/\n]/).map((x) => x.trim()).filter(Boolean);
+    const namedUnit = named.length ? bus.find((x) => norm(x.name) === norm(named[0])) : undefined;
+    const mineByName = existing.filter((e) => e.name.toLowerCase() === name.toLowerCase() && allowed.includes(e.buId));
+    const unitId = namedUnit?.id ?? (mineByName.length === 1 ? mineByName[0].buId : me.primaryBu);
+    const key = `${unitId}|${name.toLowerCase()}`;
     if (rejected.has(key)) continue;
+    if (!plans.has(key)) {
+      if (named.length > 1) warnings.push({ row: r, client: name, message: `A client belongs to one business unit; only "${named[0]}" was used.` });
+      if (named.length && !namedUnit)
+        warnings.push({ row: r, client: name, message: `Business unit "${named[0]}" isn't ${isSuperAdmin(admin) ? "in the master list" : "one of your business units"}, so ${mineByName.length === 1 ? "the existing client's unit" : "your primary unit"} was used.` });
+    }
 
     const tooLong = CLIENT_IMPORT_COLUMNS.filter((c) => c.max && values[c.key].length > c.max).map((c) => `${c.header.replace(" *", "")} (max ${c.max})`);
     if (tooLong.length) {
@@ -146,21 +157,22 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
 
     let plan = plans.get(key);
     if (!plan) {
-      const match = existing.find((e) => e.name.toLowerCase() === key);
+      const match = existing.find((e) => e.name.toLowerCase() === name.toLowerCase() && e.buId === unitId);
       if (match && visibleIds && !visibleIds.has(match.id)) {
-        skipped.push({ row: r, client: name, message: "This client belongs to another business unit, so it wasn't changed." });
+        skipped.push({ row: r, client: name, message: "You can't see this client, so it wasn't changed." });
         rejected.add(key);
         continue;
       }
       if (!match) {
-        const near = existing.find((e) => looksLike(e, name)) ?? [...plans.values()].find((p) => !p.existingId && looksLike(p, name));
+        // Near-matches only within the unit; other units' clients are theirs
+        const near = existing.find((e) => e.buId === unitId && looksLike(e, name)) ?? [...plans.values()].find((p) => !p.existingId && p.buIds[0] === unitId && looksLike(p, name));
         if (near && !allowSimilar) {
           similar.push({ row: r, client: name, existing: near.name });
           rejected.add(key);
           continue;
         }
       }
-      plan = { row: r, name, existingId: match?.id ?? null, fields: {}, buIds: [], contacts: [], hasPrimary: !!match && existingContacts.some((c) => c.clientId === match.id && c.isPrimary) };
+      plan = { row: r, name, existingId: match?.id ?? null, fields: {}, buIds: [unitId], contacts: [], hasPrimary: !!match && existingContacts.some((c) => c.clientId === match.id && c.isPrimary) };
     }
 
     // Client fields: the first non-empty value in the file wins.
@@ -207,15 +219,6 @@ export async function importClients(_: ClientImportResult | undefined, fd: FormD
       const u = users.find((x) => x.email.toLowerCase() === o || x.username.toLowerCase() === o || x.fullName.toLowerCase() === o);
       if (u) f.accountOwnerId = u.id;
       else warnings.push({ row: r, client: name, message: `Account owner "${values.owner}" isn't an active user, so it was left empty.` });
-    }
-    // One business unit per client, used when the client is new (existing clients stay in their unit)
-    const named = values.businessUnits.split(/[;,/\n]/).map((x) => x.trim()).filter(Boolean);
-    if (named.length > 1) warnings.push({ row: r, client: name, message: `A client belongs to one business unit; only "${named[0]}" was used.` });
-    if (named.length && !plan.existingId && !plan.buIds.length) {
-      const unit = bus.find((x) => norm(x.name) === norm(named[0]));
-      if (!unit)
-        warnings.push({ row: r, client: name, message: `Business unit "${named[0]}" isn't ${isSuperAdmin(admin) ? "in the master list" : "one of your business units"}, so your primary unit was used.` });
-      else plan.buIds.push(unit.id);
     }
 
     // Contact on this row (skip ones the client already has, matched by email or else by name).

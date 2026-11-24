@@ -4,6 +4,8 @@ import { Badge, Empty, labelize, PageHeader, statusTone } from "@/components/ui"
 import { db, schema } from "@/db";
 import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { clientOfMyTeam, clientVisibleTo, contactVisibleTo } from "@/lib/access";
+import { otherUnitsSql, vendorRegisteredSql } from "@/lib/client-tags";
+import { ClientTags } from "@/components/client-tags";
 import { isAdmin, isSuperAdmin, requireUser } from "@/lib/auth";
 import { activeUsers, BD_STAGE_LABELS, BD_STAGES, CLIENT_TYPES } from "@/lib/queries";
 
@@ -44,6 +46,9 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
         owner: users.fullName,
         businessUnits: sql<string>`(select b.name from business_units b where b.id = ${clients.businessUnitId})`.mapWith(String),
         contacts: sql<number>`(${db.select({ n: sql`count(*)` }).from(schema.clientContacts).where(and(eq(schema.clientContacts.clientId, clients.id), contactVisibleTo(me)))})`.mapWith(Number),
+        vendorCode: vendorRegisteredSql(),
+        // Super Admins only: the same company is also a client of other units (competition)
+        otherUnits: isSuperAdmin(me) ? otherUnitsSql() : sql<string | null>`null`,
       })
       .from(clients)
       .leftJoin(users, eq(clients.accountOwnerId, users.id))
@@ -172,6 +177,7 @@ export default async function ClientsPage(props: { searchParams: Promise<Search>
                       {c.name}
                     </Link>
                     {c.shortCode && <span className="ml-2 text-xs text-slate-500">{c.shortCode}</span>}
+                    <ClientTags vendorCode={c.vendorCode} otherUnits={c.otherUnits} />
                   </td>
                   <td>{labelize(c.type)}</td>
                   <td className="text-slate-600">{c.businessUnits || "—"}</td>

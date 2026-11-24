@@ -8,6 +8,7 @@ import { audit } from "@/lib/audit";
 import { canSeeClient, contactVisibleTo, mergeBuIds } from "@/lib/access";
 import { isAdmin, isSuperAdmin, requireUser, type SessionUser } from "@/lib/auth";
 import { assertClientName } from "@/lib/client-names";
+import { quickAddUnit } from "@/lib/client-units";
 import { cancelFollowUpTask, syncFollowUpTask } from "@/lib/meeting-follow-up-task";
 import { systemLogClientAdded } from "@/lib/system-log";
 import { notifyClientPending } from "@/lib/client-approval";
@@ -215,13 +216,12 @@ export async function saveMeeting(_: ActionState, fd: FormData): Promise<ActionS
     let clientId: number | null = null;
     const clientField = str(fd, "clientId");
     if (clientField === "new") {
-      const name = await assertClientName(req(fd, "newClientName", "New client name"), { confirmed: fd.get("confirmDifferent") === "on" });
-      const country = req(fd, "newClientCountry", "New client country");
-      // The new client belongs to one unit: the person's primary unit if the meeting is for it, else the first
-      // of the meeting's units they're in, else their primary unit.
+      // The new client belongs to one unit (see quickAddUnit); its name must be free in that unit
       const [u] = await db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, me.id));
       const mine = isSuperAdmin(me) ? buIds : buIds.filter((b) => me.buIds.includes(b));
-      const businessUnitId = u && (mine.includes(u.bu) || !mine.length) ? u.bu : mine[0];
+      const businessUnitId = quickAddUnit(u.bu, mine);
+      const name = await assertClientName(req(fd, "newClientName", "New client name"), { buId: businessUnitId, confirmed: fd.get("confirmDifferent") === "on" });
+      const country = req(fd, "newClientCountry", "New client country");
       const [c] = await db
         .insert(schema.clients)
         .values({ name, country, businessUnitId, type: "PROSPECT", status: isAdmin(me) ? "ACTIVE" : "PENDING_REVIEW", createdById: me.id })

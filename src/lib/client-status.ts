@@ -1,4 +1,5 @@
 import { and, asc, eq, inArray, ne } from "drizzle-orm";
+import { vendorRegisteredSql } from "@/lib/client-tags";
 import { db, schema } from "@/db";
 import { clientVisibleTo } from "./access";
 import type { SessionUser } from "./auth";
@@ -42,6 +43,7 @@ export async function clientStatusRows(me: SessionUser) {
         status: schema.clients.status,
         ownerId: schema.clients.accountOwnerId,
         owner: schema.users.fullName,
+        vendorCode: vendorRegisteredSql(),
       })
       .from(schema.clients)
       .leftJoin(schema.users, eq(schema.clients.accountOwnerId, schema.users.id))

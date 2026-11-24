@@ -7,6 +7,7 @@ import { countActive, FilterBar, FilterField } from "@/components/filters";
 import { scopeToBu } from "@/lib/access";
 import { requireUser } from "@/lib/auth";
 import { clientStatusRows, FLAGS, type Flag } from "@/lib/client-status";
+import { ClientTags } from "@/components/client-tags";
 import { fmtDay, fmtPlainDate, STATUS_LABEL } from "@/lib/meetings";
 import { BD_STAGE_LABELS, BD_STAGES } from "@/lib/queries";
 
@@ -109,6 +110,7 @@ export default async function ClientStatusPage(props: { searchParams: Promise<Se
                       <Link href={`/clients/${r.id}?tab=meetings`} className="link">
                         {r.name}
                       </Link>
+                      <ClientTags vendorCode={r.vendorCode} />
                       <div className="text-xs text-slate-500">
                         {r.location}
                         {r.owner ? ` · ${r.owner}` : ""}

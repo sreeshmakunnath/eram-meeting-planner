@@ -22,7 +22,7 @@ export async function ClientForm({ me, client, limited = false }: { me: SessionU
       {client && <input type="hidden" name="id" value={client.id} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Field label="Client name *">
-          <ClientNameField name="name" defaultValue={client?.name ?? ""} excludeId={client?.id} />
+          <ClientNameField name="name" defaultValue={client?.name ?? ""} excludeId={client?.id} unitId={fixed ? (client?.businessUnitId ?? null) : undefined} defaultUnitId={client?.businessUnitId ?? null} />
         </Field>
         <Field label="Short code" hint="e.g. L&T, NMDC">
           <input name="shortCode" className="input" defaultValue={client?.shortCode ?? ""} maxLength={10} />

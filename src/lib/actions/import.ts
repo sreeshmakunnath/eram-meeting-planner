@@ -78,7 +78,7 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
 
   const [users, clients, bus, [adminRow]] = await Promise.all([
     db.select({ id: schema.users.id, fullName: schema.users.fullName }).from(schema.users).where(eq(schema.users.status, "ACTIVE")),
-    db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode }).from(schema.clients),
+    db.select({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode, buId: schema.clients.businessUnitId }).from(schema.clients),
     db.select().from(schema.businessUnits),
     db.select({ bu: schema.users.businessUnitId }).from(schema.users).where(eq(schema.users.id, admin.id)),
   ]);
@@ -101,22 +101,25 @@ export async function importPlanner(_: ImportResult | undefined, fd: FormData): 
     const clientName = cleanClientName(text(get(row, "client")));
     if (!clientName) continue;
 
-    let client = clients.find((c) => c.name.toLowerCase() === clientName.toLowerCase());
+    // The same company can be a client of several units: use the row's unit (first named, else my primary)
+    // and match the client within it; with no unit on the row, a name that exists in just one unit is that client.
+    const rowBus = text(get(row, "bus")).toLowerCase();
+    const namedUnit = bus.find((b) => rowBus.includes(b.name.toLowerCase()))?.id;
+    const businessUnitId = namedUnit ?? adminRow.bu;
+    const sameName = clients.filter((c) => c.name.toLowerCase() === clientName.toLowerCase());
+    let client = sameName.find((c) => c.buId === businessUnitId) ?? (!namedUnit && sameName.length === 1 ? sameName[0] : undefined);
     if (!client) {
-      client = clients.find((c) => looksLike(c, clientName));
+      client = clients.find((c) => c.buId === businessUnitId && looksLike(c, clientName));
       const link = client && `${clientName} → ${client.name}`;
       if (link && !result.clientsLinked.includes(link)) result.clientsLinked.push(link);
     }
     if (!client) {
       const loc = text(get(row, "location"));
       const parts = loc.split(",").map((x) => x.trim()).filter(Boolean);
-      // A new client goes in the first business unit named on the row, else the importer's primary unit
-      const rowBus = text(get(row, "bus")).toLowerCase();
-      const businessUnitId = bus.find((b) => rowBus.includes(b.name.toLowerCase()))?.id ?? adminRow.bu;
       const [c] = await db
         .insert(schema.clients)
         .values({ name: clientName, country: parts.at(-1) || "Saudi Arabia", city: parts.length > 1 ? parts[0] : null, businessUnitId, type: "PROSPECT", createdById: admin.id })
-        .returning({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode });
+        .returning({ id: schema.clients.id, name: schema.clients.name, shortCode: schema.clients.shortCode, buId: schema.clients.businessUnitId });
       clients.push(c);
       client = c;
       result.clientsCreated.push(clientName);

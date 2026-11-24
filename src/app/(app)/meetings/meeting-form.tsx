@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ActionForm, SubmitButton, type ActionState } from "@/components/action-form";
 import { CheckboxList } from "@/components/checkbox-list";
 import { ClientNameField } from "@/components/client-name-field";
+import { quickAddUnit } from "@/lib/client-units";
 import type { MeetingFormOptions } from "./form-options";
 
 const STATUSES: [string, string][] = [
@@ -141,7 +142,7 @@ export function MeetingForm({
           {clientId === "new" && (
             <div className="grid gap-4 rounded-md border border-brand/20 bg-brand-50/50 p-3 md:col-span-3 md:grid-cols-2">
               <L label="New client name *">
-                <ClientNameField name="newClientName" />
+                <ClientNameField name="newClientName" unitId={options.primaryBu ? quickAddUnit(options.primaryBu, buIds.filter((b) => options.bus.some((x) => x.id === b))) : null} />
               </L>
               <L label="Country *">
                 <input name="newClientCountry" className="input" defaultValue="Saudi Arabia" maxLength={100} />

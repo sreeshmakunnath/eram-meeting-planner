@@ -197,6 +197,13 @@
       "when": 1794835427547,
       "tag": "0027_account_owner_in_unit",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1795514520611,
+      "tag": "0028_client_name_per_unit",
+      "breakpoints": true
     }
   ]
 }
